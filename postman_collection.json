@@ -1,0 +1,234 @@
+{
+  "info": {
+    "_postman_id": "shreyas-foundation-api-collection-v3",
+    "name": "Shreyas Foundation APIs",
+    "description": "Complete flow APIs: 1. Quiz with Fixed Vibhag (Shishu/Arun/Kesari/Kishore), 2. Payment Verification (Unlocks Live WhatsApp Message), 3. Form Eligibility & Pre-filled data check, 4. Full Admission Form Submission with 7 Documents & Signatures, 5. Get Stored Applications.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "1. Submit Quiz (Score >= 4, Pending Payment)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"vibhag\": \"Shishu\",\n  \"parent_name\": \"Ramesh Patel\",\n  \"child_name\": \"Aarav Patel\",\n  \"whatsapp_number\": \"9876543210\",\n  \"email\": \"ramesh.patel@example.com\",\n  \"answers\": {\n    \"1\": \"B\",\n    \"2\": \"C\",\n    \"3\": \"A\",\n    \"4\": \"D\",\n    \"5\": \"B\",\n    \"6\": \"C\",\n    \"7\": \"A\"\n  }\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/submit-quiz/",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "submit-quiz",
+            ""
+          ]
+        },
+        "description": "Step 1: User submits the quiz. Evaluates answers. If score >= 4, sets is_eligible=true and payment_status='PENDING'. Note: WhatsApp message is NOT sent yet until payment is verified."
+      },
+      "response": []
+    },
+    {
+      "name": "2. Verify Payment (Received -> Sends WhatsApp Link)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"submission_id\": 1,\n  \"payment_status\": \"RECEIVED\",\n  \"transaction_id\": \"TXN-PAY-987654\",\n  \"frontend_base_url\": \"http://localhost:3000\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/verify-payment/",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "verify-payment",
+            ""
+          ]
+        },
+        "description": "Step 2: When payment is RECEIVED, updates status to RECEIVED and triggers live Meta WhatsApp Cloud API message with the pre-filled form link. If FAILED/NOT RECEIVED, WhatsApp message is not sent."
+      },
+      "response": []
+    },
+    {
+      "name": "3. Check Form Eligibility & Get Pre-filled Data",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/admission-form/check-eligibility/?submission_id=1",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "admission-form",
+            "check-eligibility",
+            ""
+          ],
+          "query": [
+            {
+              "key": "submission_id",
+              "value": "1"
+            }
+          ]
+        },
+        "description": "Step 3: Frontend opens link from WhatsApp. Validates that score >= 4, payment_status == RECEIVED, and form has not been already submitted. Returns prefilled_data (Vibhag, Parent Name, Child Name, WhatsApp, Email) locked for normal users."
+      },
+      "response": []
+    },
+    {
+      "name": "4. Submit Admission Form (with Signatures & 7 Documents)",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            { "key": "submission_id", "value": "1", "type": "text", "description": "Required - Auto-populates and locks Vibhag, Child Name, Parent Name, WhatsApp, Email" },
+            { "key": "date", "value": "2026-11-06", "type": "text" },
+            { "key": "child_surname", "value": "Patel", "type": "text" },
+            { "key": "child_father_name", "value": "Ramesh", "type": "text" },
+            { "key": "mother_surname", "value": "Patel", "type": "text" },
+            { "key": "mother_name", "value": "Geetaben", "type": "text" },
+            { "key": "mother_father_or_husband_name", "value": "Ramesh", "type": "text" },
+            { "key": "mother_address_residence", "value": "12, Shanti Nagar, Ambawadi, Ahmedabad", "type": "text" },
+            { "key": "mother_address_office", "value": "", "type": "text" },
+            { "key": "mother_phone_residence", "value": "9876543210", "type": "text" },
+            { "key": "mother_phone_office", "value": "", "type": "text" },
+            { "key": "mother_nationality", "value": "Indian", "type": "text" },
+            { "key": "mother_education", "value": "B.Com", "type": "text" },
+            { "key": "mother_occupation", "value": "Homemaker", "type": "text" },
+            { "key": "mother_annual_income", "value": "0", "type": "text" },
+            { "key": "father_surname", "value": "Patel", "type": "text" },
+            { "key": "father_father_name", "value": "Kantilal", "type": "text" },
+            { "key": "father_address_residence", "value": "12, Shanti Nagar, Ambawadi, Ahmedabad", "type": "text" },
+            { "key": "father_address_office", "value": "402, Trade Hub, CG Road, Ahmedabad", "type": "text" },
+            { "key": "father_phone_residence", "value": "9898989898", "type": "text" },
+            { "key": "father_phone_office", "value": "0792654321", "type": "text" },
+            { "key": "father_nationality", "value": "Indian", "type": "text" },
+            { "key": "father_education", "value": "M.B.A", "type": "text" },
+            { "key": "father_occupation", "value": "Business", "type": "text" },
+            { "key": "father_annual_income", "value": "1200000", "type": "text" },
+            { "key": "birth_place_city", "value": "Ahmedabad", "type": "text" },
+            { "key": "birth_place_taluka", "value": "Ahmedabad City", "type": "text" },
+            { "key": "birth_place_district", "value": "Ahmedabad", "type": "text" },
+            { "key": "date_of_birth", "value": "2021-05-15", "type": "text" },
+            { "key": "present_age_year", "value": "5", "type": "text" },
+            { "key": "present_age_month", "value": "5", "type": "text" },
+            { "key": "present_age_day", "value": "21", "type": "text" },
+            { "key": "age_started_talking_year", "value": "1.5", "type": "text" },
+            { "key": "age_started_walking_year", "value": "1", "type": "text" },
+            { "key": "mother_tongue_mother", "value": "Gujarati", "type": "text" },
+            { "key": "mother_tongue_father", "value": "Gujarati", "type": "text" },
+            { "key": "child_height_cm", "value": "105", "type": "text" },
+            { "key": "child_weight_kg", "value": "18", "type": "text" },
+            { "key": "past_illness", "value": "None", "type": "text" },
+            { "key": "specific_care_needed", "value": "None", "type": "text" },
+            { "key": "has_sibling_in_shreyas", "value": "false", "type": "text" },
+            { "key": "current_school_name", "value": "Little Flowers Pre-School", "type": "text" },
+            { "key": "current_school_place", "value": "Ahmedabad", "type": "text" },
+            { "key": "current_school_year", "value": "2025-2026", "type": "text" },
+            { "key": "current_school_std", "value": "Sr. KG", "type": "text" },
+            { "key": "current_school_medium", "value": "English", "type": "text" },
+            { "key": "agrees_discourage_private_tuitions", "value": "true", "type": "text" },
+            { "key": "open_to_natural_medium_schooling", "value": "true", "type": "text" },
+            { "key": "vikas_kendra_1_activities", "value": "[\"Dance\", \"Kala / Art\", \"Coding\", \"Farming\", \"Swimming\"]", "type": "text" },
+            { "key": "vikas_kendra_2_activities", "value": "[\"Harmonium\", \"Art & Craft\", \"Vedic Math\"]", "type": "text" },
+            { "key": "vikas_kendra_3_activities", "value": "[\"Skating\", \"Football\"]", "type": "text" },
+            { "key": "agreed_to_rules", "value": "true", "type": "text" },
+            { "key": "terms_agreed_date", "value": "2026-11-06", "type": "text" },
+            { "key": "mother_signature", "value": "", "type": "file", "description": "Mother Signature File" },
+            { "key": "father_signature", "value": "", "type": "file", "description": "Father Signature File" },
+            { "key": "photograph_child", "value": "", "type": "file", "description": "Child Passport Size Photo" },
+            { "key": "health_certificate", "value": "", "type": "file", "description": "Doctor Health Certificate" },
+            { "key": "eye_checkup_certificate", "value": "", "type": "file", "description": "Eye Checkup Certificate" },
+            { "key": "birth_certificate", "value": "", "type": "file", "description": "English Birth Certificate Copy" },
+            { "key": "child_aadhar_card", "value": "", "type": "file", "description": "Child Aadhar Card Copy" },
+            { "key": "caste_certificate", "value": "", "type": "file", "description": "Caste Certificate (Optional)" },
+            { "key": "parent_aadhar_card", "value": "", "type": "file", "description": "Parent Aadhar Card Copy" }
+          ]
+        },
+        "url": {
+          "raw": "{{base_url}}/api/admission-form/",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "admission-form",
+            ""
+          ]
+        },
+        "description": "Step 4: Submits full admission application. Allowed only once per submission_id, only if payment was RECEIVED."
+      },
+      "response": []
+    },
+    {
+      "name": "5. Get All Stored Admission Applications",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/admission-form/",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "admission-form",
+            ""
+          ]
+        },
+        "description": "Step 5: View all stored applications with Vibhag, child details, signatures, and document URLs."
+      },
+      "response": []
+    },
+    {
+      "name": "6. Get Single Admission Application by ID",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/admission-form/?id=1",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "admission-form",
+            ""
+          ],
+          "query": [
+            {
+              "key": "id",
+              "value": "1"
+            }
+          ]
+        },
+        "description": "View single submitted application by ID."
+      },
+      "response": []
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://127.0.0.1:8000"
+    }
+  ]
+}
