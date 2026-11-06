@@ -59,38 +59,44 @@ class AdmissionApplicationSerializer(serializers.ModelSerializer):
         read_only_fields = ('application_number', 'created_at')
 
     def validate(self, attrs):
+        is_admin_update = self.context.get('is_admin_update', False)
+
         submission_id = attrs.get('submission_id')
         submission = None
-        if submission_id:
-            try:
-                submission = QuizSubmission.objects.get(id=submission_id)
-                if not submission.is_eligible:
-                    raise serializers.ValidationError({
-                        "submission_id": "You are not eligible to fill this form because quiz score is less than 4."
-                    })
-                attrs['submission'] = submission
-            except QuizSubmission.DoesNotExist:
-                raise serializers.ValidationError({"submission_id": "Invalid submission ID."})
-        else:
-            raise serializers.ValidationError({"submission_id": "submission_id is required."})
 
-        # Terms & Conditions validation
-        if not attrs.get('agreed_to_rules'):
-            raise serializers.ValidationError({
-                "agreed_to_rules": "You must agree to the Shreyas Rules and Regulations to submit the application."
-            })
+        if not is_admin_update:
+            if submission_id:
+                try:
+                    submission = QuizSubmission.objects.get(id=submission_id)
+                    if not submission.is_eligible:
+                        raise serializers.ValidationError({
+                            "submission_id": "You are not eligible to fill this form because quiz score is less than 4."
+                        })
+                    attrs['submission'] = submission
+                except QuizSubmission.DoesNotExist:
+                    raise serializers.ValidationError({"submission_id": "Invalid submission ID."})
+            else:
+                raise serializers.ValidationError({"submission_id": "submission_id is required."})
 
-        # Signature validation (At least one parent/guardian must sign)
-        if not (attrs.get('mother_signature') or attrs.get('father_signature') or attrs.get('guardian_signature')):
-            raise serializers.ValidationError({
-                "signatures": "At least one signature (Mother, Father, or Guardian) is required."
-            })
+            # Terms & Conditions validation
+            if not attrs.get('agreed_to_rules'):
+                raise serializers.ValidationError({
+                    "agreed_to_rules": "You must agree to the Shreyas Rules and Regulations to submit the application."
+                })
+
+            # Signature validation (At least one parent/guardian must sign)
+            if not (attrs.get('mother_signature') or attrs.get('father_signature') or attrs.get('guardian_signature')):
+                raise serializers.ValidationError({
+                    "signatures": "At least one signature (Mother, Father, or Guardian) is required."
+                })
 
         # Pre-fill automatic population & protection for users
         request = self.context.get('request')
-        is_admin = bool(request and request.user and request.user.is_staff)
-        
-        if submission:
+        is_admin_update = self.context.get('is_admin_update', False)
+        is_staff = bool(request and request.user and request.user.is_staff)
+        is_admin = is_admin_update or is_staff
+
+        if submission and not is_admin_update:
             # Fixed Vibhag copied from Quiz Submission
             attrs['vibhag'] = submission.vibhag
 

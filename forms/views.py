@@ -76,15 +76,15 @@ class SubmitQuizView(APIView):
             score=score,
             tag=tag,
             is_eligible=is_eligible,
-            payment_status='PENDING'
+            payment_status='RECEIVED'
         )
 
-        logger.info(f"[POST /api/submit-quiz/] Created Submission ID: {submission.id}, Score: {score}/7 ({tag}), Eligible: {is_eligible}")
+        logger.info(f"[POST /api/submit-quiz/] Created Submission ID: {submission.id}, Score: {score}/7 ({tag}), Eligible: {is_eligible}, Payment: RECEIVED")
 
         if is_eligible:
             message = (
                 f"Congratulations! You scored {score}/7 ({tag}) for Vibhag: {vibhag}. "
-                "Please proceed to fee payment. The admission form link will be sent to your WhatsApp once payment is received."
+                "You are eligible to fill the admission form."
             )
         else:
             message = (
@@ -158,7 +158,10 @@ class VerifyPaymentAndSendWhatsAppView(APIView):
                 "message": "Payment not received! Admission form link will not be sent to WhatsApp."
             }, status=status.HTTP_400_BAD_REQUEST)
 
+        # Save Payment Status directly to database first
         submission.payment_status = "RECEIVED"
+        submission.save(update_fields=['payment_status', 'payment_transaction_id'])
+        logger.info(f"[POST /api/verify-payment/] Successfully updated DB: submission {submission.id} payment_status is now RECEIVED.")
 
         base_url = frontend_base_url.rstrip("/") if frontend_base_url else request.build_absolute_uri('/')[:-1]
         form_direct_url = f"{base_url}/admission-form/?submission_id={submission.id}"
@@ -176,7 +179,7 @@ class VerifyPaymentAndSendWhatsAppView(APIView):
         logger.info(f"[POST /api/verify-payment/] Triggering WhatsApp Template 'shreyas_admission' to {submission.whatsapp_number}...")
         wa_result = send_whatsapp_template_message(submission.whatsapp_number, submission.id)
         submission.whatsapp_link_sent = wa_result.get("success", False)
-        submission.save()
+        submission.save(update_fields=['whatsapp_link_sent'])
 
         if not wa_result.get("success"):
             logger.error(f"[POST /api/verify-payment/] WhatsApp Template API Failed: {wa_result.get('error')}")
@@ -285,6 +288,7 @@ class AdmissionApplicationView(APIView):
     """
     GET: List all submitted admission forms
     POST: Submit completed admission form with signatures and documents
+    PATCH: Admin endpoint to edit/update details (name, phone, email, vibhag, etc.)
     """
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
@@ -357,7 +361,6 @@ class AdmissionApplicationView(APIView):
                 "message": f"Form already submitted with Application No: {existing_app.application_number}. Multiple submissions are not allowed."
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        # Convert query dict/form data with serializer
         serializer = AdmissionApplicationSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
             application = serializer.save(submission=submission)
@@ -372,6 +375,47 @@ class AdmissionApplicationView(APIView):
             }, status=status.HTTP_201_CREATED)
 
         logger.error(f"[POST /api/admission-form/] VALIDATION FAILED! Errors: {serializer.errors}")
+        return Response({
+            "status": "error",
+            "errors": serializer.errors
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    def patch(self, request):
+        """
+        ADMIN ONLY ENDPOINT:
+        Allows Admin Dashboard to edit/update any application fields:
+        Child Name, Father Name, Mother Name, Phone numbers, Email, Vibhag, etc.
+        """
+        app_id = request.data.get("id") or request.query_params.get("id")
+        submission_id = request.data.get("submission_id") or request.query_params.get("submission_id")
+
+        if not app_id and not submission_id:
+            return Response({
+                "status": "error",
+                "message": "Either 'id' or 'submission_id' is required to update an application."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if app_id:
+            application = get_object_or_404(AdmissionApplication, id=app_id)
+        else:
+            application = get_object_or_404(AdmissionApplication, submission_id=submission_id)
+
+        # Allow partial updates
+        serializer = AdmissionApplicationSerializer(
+            application,
+            data=request.data,
+            partial=True,
+            context={'request': request, 'is_admin_update': True}
+        )
+        if serializer.is_valid():
+            updated_app = serializer.save()
+            logger.info(f"[PATCH /api/admission-form/] Application {updated_app.application_number} updated by Admin.")
+            return Response({
+                "status": "success",
+                "message": f"Application {updated_app.application_number} updated successfully.",
+                "data": serializer.data
+            }, status=status.HTTP_200_OK)
+
         return Response({
             "status": "error",
             "errors": serializer.errors
