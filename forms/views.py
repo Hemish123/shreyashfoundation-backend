@@ -1,3 +1,5 @@
+import logging
+import json
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -8,7 +10,9 @@ from .models import QuizSubmission, AdmissionApplication
 from .questions_data import ALIGNED_ANSWERS
 from .serializers import SubmitQuizSerializer, AdmissionApplicationSerializer
 from .whatsapp_service import generate_whatsapp_link
-from .whatsapp_cloud import send_whatsapp_cloud_api
+from .whatsapp import send_whatsapp_template_message
+
+logger = logging.getLogger(__name__)
 
 def get_performance_tag(score):
     if score == 7:
@@ -27,11 +31,12 @@ class SubmitQuizView(APIView):
     """
     Submits user answers, calculates score & assigns tag:
     - If score >= 4: is_eligible = True. Proceeds to payment verification.
-    - WhatsApp link is NOT sent here yet, it will only be sent once payment is received!
     """
     def post(self, request):
+        logger.info(f"[POST /api/submit-quiz/] Request Data: {request.data}")
         serializer = SubmitQuizSerializer(data=request.data)
         if not serializer.is_valid():
+            logger.error(f"[POST /api/submit-quiz/] Validation Failed: {serializer.errors}")
             return Response({
                 "status": "error",
                 "errors": serializer.errors
@@ -41,6 +46,7 @@ class SubmitQuizView(APIView):
         parent_name = data.get("parent_name", "")
         child_name = data.get("child_name", "")
         vibhag = data.get("vibhag", "Shishu")
+        language = data.get("language", "en") or "en"
         whatsapp_number = data.get("whatsapp_number", "")
         email = data.get("email", "")
         answers = data.get("answers", {})
@@ -63,6 +69,7 @@ class SubmitQuizView(APIView):
             parent_name=parent_name,
             child_name=child_name,
             vibhag=vibhag,
+            language=language,
             whatsapp_number=whatsapp_number,
             email=email,
             answers=answers,
@@ -71,6 +78,8 @@ class SubmitQuizView(APIView):
             is_eligible=is_eligible,
             payment_status='PENDING'
         )
+
+        logger.info(f"[POST /api/submit-quiz/] Created Submission ID: {submission.id}, Score: {score}/7 ({tag}), Eligible: {is_eligible}")
 
         if is_eligible:
             message = (
@@ -102,36 +111,34 @@ class VerifyPaymentAndSendWhatsAppView(APIView):
     """
     Called after payment gateway callback or manual confirmation.
     POST /api/verify-payment/
-    Body:
-    {
-        "submission_id": 1,
-        "payment_status": "RECEIVED",  // or "FAILED"
-        "transaction_id": "TXN123456",
-        "frontend_base_url": "http://localhost:3000" // optional
-    }
-    If payment_status == 'RECEIVED' and score >= 4:
-       -> Sends WhatsApp message with form link!
-    If payment_status != 'RECEIVED':
-       -> WhatsApp link is NOT sent.
     """
     def post(self, request):
+        logger.info(f"[POST /api/verify-payment/] Request Data: {request.data}")
         submission_id = request.data.get("submission_id")
-        payment_status_input = request.data.get("payment_status", "PENDING").upper()
+        payment_status_input = str(request.data.get("payment_status", "PENDING")).upper()
         transaction_id = request.data.get("transaction_id", "")
         frontend_base_url = request.data.get("frontend_base_url", "")
 
         if not submission_id:
+            logger.error("[POST /api/verify-payment/] Missing submission_id")
             return Response({
                 "status": "error",
                 "message": "submission_id is required."
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        submission = get_object_or_404(QuizSubmission, id=submission_id)
+        try:
+            submission = QuizSubmission.objects.get(id=submission_id)
+        except QuizSubmission.DoesNotExist:
+            logger.error(f"[POST /api/verify-payment/] Submission ID {submission_id} does not exist.")
+            return Response({
+                "status": "error",
+                "message": f"Quiz submission with ID {submission_id} not found."
+            }, status=status.HTTP_404_NOT_FOUND)
 
-        # Update payment transaction info
         submission.payment_transaction_id = transaction_id
 
         if not submission.is_eligible:
+            logger.warning(f"[POST /api/verify-payment/] Submission {submission_id} scored less than 4.")
             submission.payment_status = "FAILED"
             submission.save()
             return Response({
@@ -140,6 +147,7 @@ class VerifyPaymentAndSendWhatsAppView(APIView):
             }, status=status.HTTP_400_BAD_REQUEST)
 
         if payment_status_input != "RECEIVED":
+            logger.warning(f"[POST /api/verify-payment/] Payment status is {payment_status_input}, not RECEIVED.")
             submission.payment_status = payment_status_input
             submission.save()
             return Response({
@@ -150,10 +158,8 @@ class VerifyPaymentAndSendWhatsAppView(APIView):
                 "message": "Payment not received! Admission form link will not be sent to WhatsApp."
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        # Payment received successfully!
         submission.payment_status = "RECEIVED"
 
-        # Build Form URL with submission_id
         base_url = frontend_base_url.rstrip("/") if frontend_base_url else request.build_absolute_uri('/')[:-1]
         form_direct_url = f"{base_url}/admission-form/?submission_id={submission.id}"
 
@@ -165,20 +171,32 @@ class VerifyPaymentAndSendWhatsAppView(APIView):
             f"{form_direct_url}\n\n"
             f"Best regards,\nShreyas Foundation"
         )
-
         whatsapp_click_url = generate_whatsapp_link(submission.whatsapp_number, wa_message)
 
-        # Send Live WhatsApp Message
-        wa_result = send_whatsapp_cloud_api(submission.whatsapp_number, wa_message)
+        logger.info(f"[POST /api/verify-payment/] Triggering WhatsApp Template 'shreyas_admission' to {submission.whatsapp_number}...")
+        wa_result = send_whatsapp_template_message(submission.whatsapp_number, submission.id)
         submission.whatsapp_link_sent = wa_result.get("success", False)
         submission.save()
 
+        if not wa_result.get("success"):
+            logger.error(f"[POST /api/verify-payment/] WhatsApp Template API Failed: {wa_result.get('error')}")
+            return Response({
+                "status": "error",
+                "submission_id": submission.id,
+                "vibhag": submission.vibhag,
+                "payment_status": "RECEIVED",
+                "whatsapp_link_sent": False,
+                "whatsapp_error": wa_result.get("error"),
+                "message": "Payment received, but WhatsApp template message delivery failed."
+            }, status=status.HTTP_502_BAD_GATEWAY)
+
+        logger.info(f"[POST /api/verify-payment/] WhatsApp message delivered successfully to {submission.whatsapp_number}!")
         return Response({
             "status": "success",
             "submission_id": submission.id,
             "vibhag": submission.vibhag,
             "payment_status": "RECEIVED",
-            "whatsapp_link_sent": submission.whatsapp_link_sent,
+            "whatsapp_link_sent": True,
             "whatsapp_number": submission.whatsapp_number,
             "form_url": form_direct_url,
             "whatsapp_redirect_url": whatsapp_click_url,
@@ -193,16 +211,26 @@ class AdmissionFormEligibilityCheckView(APIView):
     """
     def get(self, request):
         submission_id = request.query_params.get("submission_id")
+        logger.info(f"[GET /api/admission-form/check-eligibility/] checking submission_id: {submission_id}")
+
         if not submission_id:
+            logger.error("[GET /api/admission-form/check-eligibility/] Missing submission_id param.")
             return Response({
                 "status": "error",
                 "message": "submission_id query parameter is required."
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        submission = get_object_or_404(QuizSubmission, id=submission_id)
+        try:
+            submission = QuizSubmission.objects.get(id=submission_id)
+        except QuizSubmission.DoesNotExist:
+            logger.error(f"[GET /api/admission-form/check-eligibility/] ID {submission_id} not found.")
+            return Response({
+                "status": "error",
+                "message": f"Quiz submission {submission_id} does not exist."
+            }, status=status.HTTP_404_NOT_FOUND)
 
-        # 1. Check Quiz Score
         if not submission.is_eligible:
+            logger.warning(f"[GET /api/admission-form/check-eligibility/] Submission {submission_id} quiz score < 4.")
             return Response({
                 "status": "error",
                 "can_fill_form": False,
@@ -211,8 +239,8 @@ class AdmissionFormEligibilityCheckView(APIView):
                 "message": "You scored less than 4 in the quiz. Admission form is locked."
             }, status=status.HTTP_403_FORBIDDEN)
 
-        # 2. Check Payment Status
         if submission.payment_status != "RECEIVED":
+            logger.warning(f"[GET /api/admission-form/check-eligibility/] Submission {submission_id} payment is {submission.payment_status}.")
             return Response({
                 "status": "error",
                 "can_fill_form": False,
@@ -220,9 +248,9 @@ class AdmissionFormEligibilityCheckView(APIView):
                 "message": "Payment is not yet received. Please complete fee payment to unlock the admission form."
             }, status=status.HTTP_402_PAYMENT_REQUIRED)
 
-        # 3. Check if already submitted
         existing_application = AdmissionApplication.objects.filter(submission=submission).first()
         if existing_application:
+            logger.warning(f"[GET /api/admission-form/check-eligibility/] Form already submitted with Application No: {existing_application.application_number}")
             return Response({
                 "status": "already_submitted",
                 "can_fill_form": False,
@@ -232,6 +260,7 @@ class AdmissionFormEligibilityCheckView(APIView):
                 "message": f"This admission form has already been submitted (Application No: {existing_application.application_number}). You cannot submit it again."
             }, status=status.HTTP_200_OK)
 
+        logger.info(f"[GET /api/admission-form/check-eligibility/] Submission {submission_id} is VALID and ELIGIBLE to open form.")
         return Response({
             "status": "success",
             "can_fill_form": True,
@@ -254,14 +283,15 @@ class AdmissionFormEligibilityCheckView(APIView):
 
 class AdmissionApplicationView(APIView):
     """
-    GET: List all submitted admission forms or a specific one with ?id=
-    POST: Submit the completed admission form (Only allowed if score >= 4 AND payment_status == RECEIVED)
+    GET: List all submitted admission forms
+    POST: Submit completed admission form with signatures and documents
     """
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def get(self, request):
         app_id = request.query_params.get("id")
         submission_id = request.query_params.get("submission_id")
+        logger.info(f"[GET /api/admission-form/] params id={app_id}, submission_id={submission_id}")
 
         if app_id:
             application = get_object_or_404(AdmissionApplication, id=app_id)
@@ -282,32 +312,43 @@ class AdmissionApplicationView(APIView):
         }, status=status.HTTP_200_OK)
 
     def post(self, request):
+        logger.info(f"[POST /api/admission-form/] Incoming request data keys: {list(request.data.keys())}")
+        logger.info(f"[POST /api/admission-form/] Files uploaded: {list(request.FILES.keys())}")
+
         submission_id = request.data.get("submission_id")
         if not submission_id:
+            logger.error("[POST /api/admission-form/] Missing submission_id")
             return Response({
                 "status": "error",
                 "message": "submission_id is required to verify quiz & payment eligibility."
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        submission = get_object_or_404(QuizSubmission, id=submission_id)
+        try:
+            submission = QuizSubmission.objects.get(id=submission_id)
+        except QuizSubmission.DoesNotExist:
+            logger.error(f"[POST /api/admission-form/] Submission {submission_id} does not exist.")
+            return Response({
+                "status": "error",
+                "message": f"Quiz submission {submission_id} not found."
+            }, status=status.HTTP_404_NOT_FOUND)
 
-        # Check Quiz Eligibility
         if not submission.is_eligible:
+            logger.error(f"[POST /api/admission-form/] Submission {submission_id} not eligible (score < 4).")
             return Response({
                 "status": "error",
                 "message": "Not eligible to submit form! Your quiz score is less than 4."
             }, status=status.HTTP_403_FORBIDDEN)
 
-        # Check Payment Status
         if submission.payment_status != "RECEIVED":
+            logger.error(f"[POST /api/admission-form/] Submission {submission_id} payment status is {submission.payment_status}.")
             return Response({
                 "status": "error",
                 "message": "Cannot submit form! Payment has not been received."
             }, status=status.HTTP_402_PAYMENT_REQUIRED)
 
-        # Check if already submitted
         existing_app = AdmissionApplication.objects.filter(submission=submission).first()
         if existing_app:
+            logger.warning(f"[POST /api/admission-form/] Form already submitted for submission_id {submission_id} with App No: {existing_app.application_number}")
             return Response({
                 "status": "error",
                 "can_fill_form": False,
@@ -316,9 +357,11 @@ class AdmissionApplicationView(APIView):
                 "message": f"Form already submitted with Application No: {existing_app.application_number}. Multiple submissions are not allowed."
             }, status=status.HTTP_400_BAD_REQUEST)
 
+        # Convert query dict/form data with serializer
         serializer = AdmissionApplicationSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
             application = serializer.save(submission=submission)
+            logger.info(f"[POST /api/admission-form/] Form SUBMITTED SUCCESSFULLY! Application Number: {application.application_number}")
             return Response({
                 "status": "success",
                 "message": "Admission form submitted and stored successfully!",
@@ -328,6 +371,7 @@ class AdmissionApplicationView(APIView):
                 "data": serializer.data
             }, status=status.HTTP_201_CREATED)
 
+        logger.error(f"[POST /api/admission-form/] VALIDATION FAILED! Errors: {serializer.errors}")
         return Response({
             "status": "error",
             "errors": serializer.errors

@@ -18,6 +18,12 @@ class QuizSubmission(models.Model):
         default='Shishu',
         help_text="Vibhag: Shishu / Arun / Kesari / Kishore (Fixed)"
     )
+    language = models.CharField(
+        max_length=10,
+        choices=[('en', 'English'), ('gu', 'Gujarati')],
+        default='en',
+        blank=True
+    )
     answers = models.JSONField(help_text="User submitted answers as {q_id: selected_option}")
     score = models.IntegerField(default=0)
     tag = models.CharField(max_length=50, blank=True, default="")

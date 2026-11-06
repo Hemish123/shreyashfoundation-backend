@@ -9,6 +9,12 @@ class SubmitQuizSerializer(serializers.Serializer):
         default='Shishu',
         help_text="Specify Vibhag: Shishu / Arun / Kesari / Kishore"
     )
+    language = serializers.CharField(
+        required=False,
+        default='en',
+        allow_blank=True,
+        help_text="Language: 'en' or 'gu'"
+    )
     whatsapp_number = serializers.CharField(
         required=True,
         help_text="10-digit WhatsApp number to receive admission form link"
