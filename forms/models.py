@@ -24,10 +24,16 @@ class QuizSubmission(models.Model):
         default='en',
         blank=True
     )
-    answers = models.JSONField(help_text="User submitted answers as {q_id: selected_option}")
+    answers = models.JSONField(default=dict, blank=True, help_text="User submitted answers as {q_id: selected_option}")
     score = models.IntegerField(default=0)
     tag = models.CharField(max_length=50, blank=True, default="")
     is_eligible = models.BooleanField(default=False)
+    qa_status = models.CharField(
+        max_length=20,
+        choices=[('PENDING', 'Pending'), ('PASSED', 'Passed'), ('FAILED', 'Failed')],
+        default='PENDING',
+        help_text="QA status: PENDING (not attended yet) / PASSED (score >= 4) / FAILED (score < 4)"
+    )
     
     # Payment status tracking
     payment_status = models.CharField(

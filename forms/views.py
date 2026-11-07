@@ -8,7 +8,7 @@ from django.shortcuts import get_object_or_404
 
 from .models import QuizSubmission, AdmissionApplication
 from .questions_data import ALIGNED_ANSWERS
-from .serializers import SubmitQuizSerializer, AdmissionApplicationSerializer
+from .serializers import SubmitQuizSerializer, QuizSubmissionListSerializer, AdmissionApplicationSerializer
 from .whatsapp_service import generate_whatsapp_link
 from .whatsapp import send_whatsapp_template_message
 
@@ -29,9 +29,50 @@ def get_performance_tag(score):
 
 class SubmitQuizView(APIView):
     """
-    Submits user answers, calculates score & assigns tag:
+    GET: List all quiz submissions (Enquiries) for Admin Dashboard
+    POST: Submits user answers, calculates score & assigns tag:
     - If score >= 4: is_eligible = True. Proceeds to payment verification.
     """
+    def get(self, request):
+        """
+        Fetch all enquiries / quiz submissions for Admin Dashboard.
+        Supports query params:
+        - ?id=<id>
+        - ?is_eligible=true/false
+        - ?vibhag=Shishu
+        """
+        sub_id = request.query_params.get("id")
+        if sub_id:
+            submission = get_object_or_404(QuizSubmission, id=sub_id)
+            serializer = QuizSubmissionListSerializer(submission)
+            return Response({"status": "success", "data": serializer.data}, status=status.HTTP_200_OK)
+
+        queryset = QuizSubmission.objects.all().order_by("-created_at")
+
+        # Optional filters
+        vibhag = request.query_params.get("vibhag")
+        if vibhag:
+            queryset = queryset.filter(vibhag__iexact=vibhag)
+
+        is_eligible = request.query_params.get("is_eligible")
+        if is_eligible is not None:
+            queryset = queryset.filter(is_eligible=(is_eligible.lower() == 'true'))
+
+        payment_status = request.query_params.get("payment_status")
+        if payment_status:
+            queryset = queryset.filter(payment_status__iexact=payment_status)
+
+        serializer = QuizSubmissionListSerializer(queryset, many=True)
+        return Response({
+            "status": "success",
+            "total_enquiries": queryset.count(),
+            "qa_passed": queryset.filter(qa_status="PASSED").count(),
+            "qa_failed": queryset.filter(qa_status="FAILED").count(),
+            "qa_pending": queryset.filter(qa_status="PENDING").count(),
+            "fees_collected": queryset.filter(payment_status="RECEIVED").count(),
+            "data": serializer.data
+        }, status=status.HTTP_200_OK)
+
     def post(self, request):
         logger.info(f"[POST /api/submit-quiz/] Request Data: {request.data}")
         serializer = SubmitQuizSerializer(data=request.data)
@@ -43,6 +84,7 @@ class SubmitQuizView(APIView):
             }, status=status.HTTP_400_BAD_REQUEST)
 
         data = serializer.validated_data
+        submission_id = data.get("submission_id")
         parent_name = data.get("parent_name", "")
         child_name = data.get("child_name", "")
         vibhag = data.get("vibhag", "Shishu")
@@ -51,7 +93,75 @@ class SubmitQuizView(APIView):
         email = data.get("email", "")
         answers = data.get("answers", {})
 
-        # Check if an eligible quiz submission or completed application already exists for this WhatsApp number and child
+        # If submission_id is provided, parent is submitting the quiz for an existing enquiry
+        if submission_id:
+            submission = QuizSubmission.objects.filter(id=submission_id).first()
+            if not submission:
+                return Response({
+                    "status": "error",
+                    "message": f"Enquiry with ID {submission_id} not found."
+                }, status=status.HTTP_404_NOT_FOUND)
+
+            # Check if already submitted admission form
+            existing_app = AdmissionApplication.objects.filter(submission=submission).first()
+            if existing_app:
+                return Response({
+                    "status": "error",
+                    "already_submitted": True,
+                    "application_number": existing_app.application_number,
+                    "message": f"Admission form already submitted (App No: {existing_app.application_number})."
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Check if already passed quiz
+            if submission.qa_status == "PASSED":
+                return Response({
+                    "status": "error",
+                    "already_passed": True,
+                    "submission_id": submission.id,
+                    "score": submission.score,
+                    "tag": submission.tag,
+                    "message": f"Quiz already passed with score {submission.score}/7 ({submission.tag})."
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Grade the submitted answers
+            score = 0
+            breakdown = {}
+            for q_id, correct_ans in ALIGNED_ANSWERS.items():
+                user_ans = answers.get(str(q_id)) or answers.get(q_id)
+                if user_ans and str(user_ans).strip().upper() == correct_ans:
+                    score += 1
+                    breakdown[q_id] = {"selected": user_ans, "matched": True}
+                else:
+                    breakdown[q_id] = {"selected": user_ans, "matched": False}
+
+            is_eligible = score >= 4
+            qa_status = "PASSED" if is_eligible else "FAILED"
+            tag = get_performance_tag(score)
+
+            submission.answers = answers
+            submission.score = score
+            submission.is_eligible = is_eligible
+            submission.qa_status = qa_status
+            submission.tag = tag
+            submission.save()
+
+            logger.info(f"[POST /api/submit-quiz/] Existing Submission {submission.id} graded: Score {score}/7 ({tag}), QA: {qa_status}")
+
+            return Response({
+                "status": "success",
+                "submission_id": submission.id,
+                "vibhag": submission.vibhag,
+                "qa_status": qa_status,
+                "score": score,
+                "total": len(ALIGNED_ANSWERS),
+                "tag": tag,
+                "can_fill_form": is_eligible,
+                "payment_status": submission.payment_status,
+                "message": f"Quiz completed! Score: {score}/7 ({tag})." if is_eligible else f"Score: {score}/7 ({tag}). Minimum 4 required to pass.",
+                "breakdown": breakdown
+            }, status=status.HTTP_200_OK)
+
+        # Otherwise, creating a new enquiry (Admin side)
         clean_phone = "".join(filter(str.isdigit, str(whatsapp_number)))
         clean_phone_10 = clean_phone[-10:] if len(clean_phone) >= 10 else clean_phone
 
@@ -89,19 +199,30 @@ class SubmitQuizView(APIView):
                 "message": f"Quiz has already been completed for '{child_name}' with score {existing_passed_quiz.score}/7 ({existing_passed_quiz.tag}). Please fill the admission form using the link sent to your WhatsApp."
             }, status=status.HTTP_400_BAD_REQUEST)
 
+        # Determine if answers were submitted (QA attempted)
+        has_answers = bool(answers and len(answers) > 0)
+        
         score = 0
         breakdown = {}
 
-        for q_id, correct_ans in ALIGNED_ANSWERS.items():
-            user_ans = answers.get(str(q_id)) or answers.get(q_id)
-            if user_ans and str(user_ans).strip().upper() == correct_ans:
-                score += 1
-                breakdown[q_id] = {"selected": user_ans, "matched": True}
-            else:
-                breakdown[q_id] = {"selected": user_ans, "matched": False}
+        if has_answers:
+            for q_id, correct_ans in ALIGNED_ANSWERS.items():
+                user_ans = answers.get(str(q_id)) or answers.get(q_id)
+                if user_ans and str(user_ans).strip().upper() == correct_ans:
+                    score += 1
+                    breakdown[q_id] = {"selected": user_ans, "matched": True}
+                else:
+                    breakdown[q_id] = {"selected": user_ans, "matched": False}
 
-        is_eligible = score >= 4
-        tag = get_performance_tag(score)
+            is_eligible = score >= 4
+            qa_status = "PASSED" if is_eligible else "FAILED"
+            tag = get_performance_tag(score)
+        else:
+            # Enquiry created without taking QA yet (Pending QA)
+            score = 0
+            is_eligible = False
+            qa_status = "PENDING"
+            tag = "Pending QA"
 
         submission = QuizSubmission.objects.create(
             parent_name=parent_name,
@@ -113,13 +234,16 @@ class SubmitQuizView(APIView):
             answers=answers,
             score=score,
             tag=tag,
+            qa_status=qa_status,
             is_eligible=is_eligible,
             payment_status='RECEIVED'
         )
 
-        logger.info(f"[POST /api/submit-quiz/] Created Submission ID: {submission.id}, Score: {score}/7 ({tag}), Eligible: {is_eligible}, Payment: RECEIVED")
+        logger.info(f"[POST /api/submit-quiz/] Created Submission ID: {submission.id}, QA Status: {qa_status}, Score: {score}/7 ({tag}), Payment: RECEIVED")
 
-        if is_eligible:
+        if not has_answers:
+            message = f"Enquiry created for {child_name}. QA is pending."
+        elif is_eligible:
             message = (
                 f"Congratulations! You scored {score}/7 ({tag}) for Vibhag: {vibhag}. "
                 "You are eligible to fill the admission form."
@@ -133,6 +257,7 @@ class SubmitQuizView(APIView):
             "status": "success",
             "submission_id": submission.id,
             "vibhag": vibhag,
+            "qa_status": qa_status,
             "score": score,
             "total": len(ALIGNED_ANSWERS),
             "tag": tag,
@@ -175,13 +300,14 @@ class VerifyPaymentAndSendWhatsAppView(APIView):
 
         submission.payment_transaction_id = transaction_id
 
-        if not submission.is_eligible:
+        # If student already took quiz and explicitly failed (score < 4 and not pending)
+        if submission.qa_status == "FAILED":
             logger.warning(f"[POST /api/verify-payment/] Submission {submission_id} scored less than 4.")
             submission.payment_status = "FAILED"
             submission.save()
             return Response({
                 "status": "error",
-                "message": "Candidate is not eligible based on quiz score. Payment cannot unlock form."
+                "message": "Candidate is not eligible based on quiz score."
             }, status=status.HTTP_400_BAD_REQUEST)
 
         if payment_status_input != "RECEIVED":
@@ -472,10 +598,10 @@ class AdmissionApplicationView(APIView):
     def delete(self, request):
         """
         ADMIN ONLY ENDPOINT:
-        Allows Admin Dashboard to delete an admission application strictly via query parameters:
+        Allows Admin Dashboard to delete an application OR an enquiry.
         DELETE /api/admission-form/?id=8
         or
-        DELETE /api/admission-form/?submission_id=33
+        DELETE /api/admission-form/?submission_id=41
         """
         app_id = request.query_params.get("id")
         submission_id = request.query_params.get("submission_id")
@@ -483,32 +609,55 @@ class AdmissionApplicationView(APIView):
         if not app_id and not submission_id:
             return Response({
                 "status": "error",
-                "message": "Either 'id' or 'submission_id' query parameter is required to delete an application."
+                "message": "Either 'id' or 'submission_id' query parameter is required to delete."
             }, status=status.HTTP_400_BAD_REQUEST)
 
+        # 1. If deleting by Admission Application ID
         if app_id:
             application = AdmissionApplication.objects.filter(id=app_id).first()
-            if not application:
+            if application:
+                app_number = application.application_number
+                application_id = application.id
+                sub_id = application.submission_id
+                application.delete()
+                # Also delete associated quiz submission
+                QuizSubmission.objects.filter(id=sub_id).delete()
+                logger.info(f"[DELETE /api/admission-form/] Application {app_number} and Submission {sub_id} deleted by Admin.")
+                return Response({
+                    "status": "success",
+                    "message": f"Application {app_number} and associated enquiry deleted successfully.",
+                    "deleted_id": application_id,
+                    "application_number": app_number
+                }, status=status.HTTP_200_OK)
+            else:
                 return Response({
                     "status": "error",
                     "message": f"Admission application with ID {app_id} not found."
                 }, status=status.HTTP_404_NOT_FOUND)
-        else:
+
+        # 2. If deleting by submission_id
+        if submission_id:
             application = AdmissionApplication.objects.filter(submission_id=submission_id).first()
-            if not application:
+            submission = QuizSubmission.objects.filter(id=submission_id).first()
+
+            if not application and not submission:
                 return Response({
                     "status": "error",
-                    "message": f"Admission application for submission_id {submission_id} not found."
+                    "message": f"No application or enquiry found for submission_id {submission_id}."
                 }, status=status.HTTP_404_NOT_FOUND)
 
-        app_number = application.application_number
-        application_id = application.id
-        application.delete()
+            app_number = application.application_number if application else None
+            child_name = submission.child_name if submission else (application.child_first_name if application else "")
 
-        logger.info(f"[DELETE /api/admission-form/] Application {app_number} (ID: {application_id}) deleted by Admin.")
-        return Response({
-            "status": "success",
-            "message": f"Application {app_number} deleted successfully.",
-            "deleted_id": application_id,
-            "application_number": app_number
-        }, status=status.HTTP_200_OK)
+            if application:
+                application.delete()
+            if submission:
+                submission.delete()
+
+            logger.info(f"[DELETE /api/admission-form/] Successfully deleted submission_id {submission_id} (Child: {child_name}, App: {app_number}).")
+            return Response({
+                "status": "success",
+                "message": f"Successfully deleted enquiry/application for submission_id {submission_id} ({child_name}).",
+                "submission_id": int(submission_id),
+                "application_number": app_number
+            }, status=status.HTTP_200_OK)

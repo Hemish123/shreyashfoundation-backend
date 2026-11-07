@@ -8,6 +8,8 @@ from .views import (
 
 urlpatterns = [
     path('submit-quiz/', SubmitQuizView.as_view(), name='submit-quiz'),
+    path('enquiries/', SubmitQuizView.as_view(), name='enquiries'),
+    path('add-enquiry/', SubmitQuizView.as_view(), name='add-enquiry'),
     path('verify-payment/', VerifyPaymentAndSendWhatsAppView.as_view(), name='verify-payment'),
     path('admission-form/check-eligibility/', AdmissionFormEligibilityCheckView.as_view(), name='check-form-eligibility'),
     path('admission-form/', AdmissionApplicationView.as_view(), name='admission-form'),

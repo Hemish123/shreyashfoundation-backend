@@ -1,12 +1,48 @@
 from rest_framework import serializers
 from .models import QuizSubmission, AdmissionApplication
 
+class QuizSubmissionListSerializer(serializers.ModelSerializer):
+    admission_submitted = serializers.SerializerMethodField()
+    application_number = serializers.SerializerMethodField()
+
+    class Meta:
+        model = QuizSubmission
+        fields = [
+            'id',
+            'parent_name',
+            'child_name',
+            'vibhag',
+            'language',
+            'whatsapp_number',
+            'email',
+            'score',
+            'tag',
+            'qa_status',
+            'is_eligible',
+            'payment_status',
+            'whatsapp_link_sent',
+            'created_at',
+            'admission_submitted',
+            'application_number'
+        ]
+
+    def get_admission_submitted(self, obj):
+        return hasattr(obj, 'admission_application')
+
+    def get_application_number(self, obj):
+        if hasattr(obj, 'admission_application'):
+            return obj.admission_application.application_number
+        return None
+
+
 class SubmitQuizSerializer(serializers.Serializer):
+    submission_id = serializers.IntegerField(required=False, help_text="Existing enquiry ID if parent is submitting quiz")
     parent_name = serializers.CharField(required=False, allow_blank=True, default="")
     child_name = serializers.CharField(required=False, allow_blank=True, default="")
     vibhag = serializers.ChoiceField(
         choices=QuizSubmission.VIBHAG_CHOICES,
         default='Shishu',
+        required=False,
         help_text="Specify Vibhag: Shishu / Arun / Kesari / Kishore"
     )
     language = serializers.CharField(
@@ -16,8 +52,10 @@ class SubmitQuizSerializer(serializers.Serializer):
         help_text="Language: 'en' or 'gu'"
     )
     whatsapp_number = serializers.CharField(
-        required=True,
-        help_text="10-digit WhatsApp number to receive admission form link"
+        required=False,
+        allow_blank=True,
+        default="",
+        help_text="10-digit WhatsApp number"
     )
     email = serializers.EmailField(
         required=False,
@@ -33,19 +71,20 @@ class SubmitQuizSerializer(serializers.Serializer):
     )
     answers = serializers.DictField(
         child=serializers.CharField(),
+        required=False,
+        default=dict,
         help_text="Dictionary of question IDs and selected option, e.g. {'1': 'B', '2': 'C', ...}"
     )
 
     def validate_answers(self, value):
-        if not value:
-            raise serializers.ValidationError("Answers cannot be empty.")
-        return value
+        return value or {}
 
-    def validate_whatsapp_number(self, value):
-        clean_num = "".join(filter(str.isdigit, str(value)))
-        if len(clean_num) < 10:
-            raise serializers.ValidationError("Please provide a valid 10-digit WhatsApp number.")
-        return clean_num
+    def validate(self, attrs):
+        submission_id = attrs.get('submission_id')
+        whatsapp_number = attrs.get('whatsapp_number')
+        if not submission_id and not whatsapp_number:
+            raise serializers.ValidationError({"whatsapp_number": "WhatsApp number is required when adding a new enquiry."})
+        return attrs
 
 
 class AdmissionApplicationSerializer(serializers.ModelSerializer):
