@@ -17,8 +17,8 @@ from dotenv import load_dotenv
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Load .env file
-load_dotenv(BASE_DIR / '.env')
+# Load .env file (override=True so .env values take precedence over system environment variables)
+load_dotenv(BASE_DIR / '.env', override=True)
 
 # Quick-start development settings - unsuitable for production
 SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-qzj#zqcxl--0bmat+m8(quzp@m4umi2wc*sd880p_nbe46o0it')
@@ -88,12 +88,41 @@ WSGI_APPLICATION = 'Core.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+#for local 
+if DEBUG:
+    # DATABASES = {
+    #     'default': {
+    #         'ENGINE': 'django.db.backends.sqlite3',
+    #         'NAME': BASE_DIR / 'db.sqlite3',
+    #     }
+    # }
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': 'admissionshreyash',
+            'USER': 'hydjqkjgkz',
+            'PASSWORD': '$D1FJw3eZcyAJsPd',
+            'HOST': 'astroai-server.postgres.database.azure.com',
+            'PORT': '5432',
+        }
     }
-}
+
+else:
+    CONNECTION_STRING = os.environ.get('AZURE_POSTGRESQL_CONNECTIONSTRING', "dbname=admissionshreyash host=astroai-server.postgres.database.azure.com port=5432 sslmode=require user=hydjqkjgkz password=$D1FJw3eZcyAJsPd")
+    conn_str_params = {pair.split('=')[0]: pair.split('=')[1] for pair in CONNECTION_STRING.split(' ')}
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': conn_str_params['dbname'],
+            'HOST': conn_str_params['host'],
+            'PORT': conn_str_params.get('port', '5432'),
+            'USER': conn_str_params['user'],
+            'PASSWORD': conn_str_params['password'],
+            'OPTIONS': {
+                'sslmode': conn_str_params.get('sslmode', 'require'),
+            },
+        }
+    }
 
 
 # Password validation
