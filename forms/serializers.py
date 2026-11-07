@@ -107,10 +107,6 @@ class AdmissionApplicationSerializer(serializers.ModelSerializer):
             if submission_id:
                 try:
                     submission = QuizSubmission.objects.get(id=submission_id)
-                    if not submission.is_eligible:
-                        raise serializers.ValidationError({
-                            "submission_id": "You are not eligible to fill this form because quiz score is less than 4."
-                        })
                     attrs['submission'] = submission
                 except QuizSubmission.DoesNotExist:
                     raise serializers.ValidationError({"submission_id": "Invalid submission ID."})

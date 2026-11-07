@@ -5,6 +5,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from django.shortcuts import get_object_or_404
+from django.conf import settings
 
 from .models import QuizSubmission, AdmissionApplication
 from .questions_data import ALIGNED_ANSWERS
@@ -155,9 +156,9 @@ class SubmitQuizView(APIView):
                 "score": score,
                 "total": len(ALIGNED_ANSWERS),
                 "tag": tag,
-                "can_fill_form": is_eligible,
+                "can_fill_form": True,
                 "payment_status": submission.payment_status,
-                "message": f"Quiz completed! Score: {score}/7 ({tag})." if is_eligible else f"Score: {score}/7 ({tag}). Minimum 4 required to pass.",
+                "message": f"Quiz completed! Score: {score}/7 ({tag}). You can now proceed to fill the admission form.",
                 "breakdown": breakdown
             }, status=status.HTTP_200_OK)
 
@@ -300,17 +301,18 @@ class VerifyPaymentAndSendWhatsAppView(APIView):
 
         submission.payment_transaction_id = transaction_id
 
-        # If student already took quiz and explicitly failed (score < 4 and not pending)
-        if submission.qa_status == "FAILED":
-            logger.warning(f"[POST /api/verify-payment/] Submission {submission_id} scored less than 4.")
-            submission.payment_status = "FAILED"
+        # Note: All candidates can proceed to payment & form filling; score is recorded for Admin dashboard
+        if payment_status_input != "RECEIVED":
+            logger.warning(f"[POST /api/verify-payment/] Payment status is {payment_status_input}, not RECEIVED.")
+            submission.payment_status = payment_status_input
             submission.save()
             return Response({
                 "status": "error",
-                "message": "Candidate is not eligible based on quiz score."
+                "submission_id": submission.id,
+                "payment_status": submission.payment_status,
+                "whatsapp_link_sent": False,
+                "message": "Payment not received! Admission form link will not be sent to WhatsApp."
             }, status=status.HTTP_400_BAD_REQUEST)
-
-        if payment_status_input != "RECEIVED":
             logger.warning(f"[POST /api/verify-payment/] Payment status is {payment_status_input}, not RECEIVED.")
             submission.payment_status = payment_status_input
             submission.save()
@@ -396,16 +398,7 @@ class AdmissionFormEligibilityCheckView(APIView):
                 "message": f"Quiz submission {submission_id} does not exist."
             }, status=status.HTTP_404_NOT_FOUND)
 
-        if not submission.is_eligible:
-            logger.warning(f"[GET /api/admission-form/check-eligibility/] Submission {submission_id} quiz score < 4.")
-            return Response({
-                "status": "error",
-                "can_fill_form": False,
-                "score": submission.score,
-                "tag": submission.tag,
-                "message": "You scored less than 4 in the quiz. Admission form is locked."
-            }, status=status.HTTP_403_FORBIDDEN)
-
+        # Quiz score is logged for admin reporting, all parents can fill the form once quiz is completed or enquiry registered
         if submission.payment_status != "RECEIVED":
             logger.warning(f"[GET /api/admission-form/check-eligibility/] Submission {submission_id} payment is {submission.payment_status}.")
             return Response({
@@ -510,13 +503,6 @@ class AdmissionApplicationView(APIView):
                 "message": f"Quiz submission {submission_id} not found."
             }, status=status.HTTP_404_NOT_FOUND)
 
-        if not submission.is_eligible:
-            logger.error(f"[POST /api/admission-form/] Submission {submission_id} not eligible (score < 4).")
-            return Response({
-                "status": "error",
-                "message": "Not eligible to submit form! Your quiz score is less than 4."
-            }, status=status.HTTP_403_FORBIDDEN)
-
         if submission.payment_status != "RECEIVED":
             logger.error(f"[POST /api/admission-form/] Submission {submission_id} payment status is {submission.payment_status}.")
             return Response({
@@ -584,9 +570,30 @@ class AdmissionApplicationView(APIView):
         if serializer.is_valid():
             updated_app = serializer.save()
             logger.info(f"[PATCH /api/admission-form/] Application {updated_app.application_number} updated by Admin.")
+
+            # Check if phone number was updated (father_mobile, mother_mobile, or whatsapp_number)
+            new_number = request.data.get("whatsapp_number") or request.data.get("father_mobile") or request.data.get("mother_mobile")
+            whatsapp_sent = False
+            if new_number:
+                clean_num = "".join(filter(str.isdigit, str(new_number)))
+                if len(clean_num) >= 10:
+                    # Update QuizSubmission whatsapp_number as well to keep them in sync
+                    if updated_app.submission:
+                        updated_app.submission.whatsapp_number = clean_num
+                        updated_app.submission.save(update_fields=['whatsapp_number'])
+
+                    res = send_whatsapp_template_message(clean_num, updated_app.submission_id)
+                    if res.get("success"):
+                        whatsapp_sent = True
+                        if updated_app.submission:
+                            updated_app.submission.whatsapp_link_sent = True
+                            updated_app.submission.save(update_fields=['whatsapp_link_sent'])
+                        logger.info(f"[PATCH /api/admission-form/] Resent WhatsApp to {clean_num} for submission {updated_app.submission_id}!")
+
             return Response({
                 "status": "success",
-                "message": f"Application {updated_app.application_number} updated successfully.",
+                "message": f"Application {updated_app.application_number} updated successfully. WhatsApp message resent to {new_number}." if whatsapp_sent else f"Application {updated_app.application_number} updated successfully.",
+                "whatsapp_link_sent": whatsapp_sent,
                 "data": serializer.data
             }, status=status.HTTP_200_OK)
 
