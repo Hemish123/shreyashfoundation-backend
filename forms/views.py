@@ -51,6 +51,44 @@ class SubmitQuizView(APIView):
         email = data.get("email", "")
         answers = data.get("answers", {})
 
+        # Check if an eligible quiz submission or completed application already exists for this WhatsApp number and child
+        clean_phone = "".join(filter(str.isdigit, str(whatsapp_number)))
+        clean_phone_10 = clean_phone[-10:] if len(clean_phone) >= 10 else clean_phone
+
+        # 1. First check if an application has already been submitted for this child/phone
+        existing_app = AdmissionApplication.objects.filter(
+            submission__whatsapp_number__endswith=clean_phone_10,
+            child_first_name__iexact=child_name.strip()
+        ).first()
+
+        if existing_app:
+            logger.warning(f"[POST /api/submit-quiz/] Form already submitted (App No: {existing_app.application_number}) for child '{child_name}'.")
+            return Response({
+                "status": "error",
+                "already_submitted": True,
+                "submission_id": existing_app.submission_id,
+                "application_number": existing_app.application_number,
+                "message": f"Admission application for '{child_name}' has already been submitted (App No: {existing_app.application_number}). You cannot re-take the quiz."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # 2. Check if the child has already passed the quiz (is_eligible=True)
+        existing_passed_quiz = QuizSubmission.objects.filter(
+            whatsapp_number__endswith=clean_phone_10,
+            child_name__iexact=child_name.strip(),
+            is_eligible=True
+        ).order_by('-id').first()
+
+        if existing_passed_quiz:
+            logger.warning(f"[POST /api/submit-quiz/] Child '{child_name}' already passed quiz (Submission {existing_passed_quiz.id}).")
+            return Response({
+                "status": "error",
+                "already_passed": True,
+                "submission_id": existing_passed_quiz.id,
+                "score": existing_passed_quiz.score,
+                "tag": existing_passed_quiz.tag,
+                "message": f"Quiz has already been completed for '{child_name}' with score {existing_passed_quiz.score}/7 ({existing_passed_quiz.tag}). Please fill the admission form using the link sent to your WhatsApp."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
         score = 0
         breakdown = {}
 
@@ -298,12 +336,22 @@ class AdmissionApplicationView(APIView):
         logger.info(f"[GET /api/admission-form/] params id={app_id}, submission_id={submission_id}")
 
         if app_id:
-            application = get_object_or_404(AdmissionApplication, id=app_id)
+            application = AdmissionApplication.objects.filter(id=app_id).first()
+            if not application:
+                return Response({
+                    "status": "error",
+                    "message": f"Admission application with ID {app_id} not found."
+                }, status=status.HTTP_404_NOT_FOUND)
             serializer = AdmissionApplicationSerializer(application)
             return Response({"status": "success", "data": serializer.data}, status=status.HTTP_200_OK)
 
         if submission_id:
-            application = get_object_or_404(AdmissionApplication, submission_id=submission_id)
+            application = AdmissionApplication.objects.filter(submission_id=submission_id).first()
+            if not application:
+                return Response({
+                    "status": "error",
+                    "message": f"Admission application for submission_id {submission_id} not found. (The form may not have been submitted yet)."
+                }, status=status.HTTP_404_NOT_FOUND)
             serializer = AdmissionApplicationSerializer(application)
             return Response({"status": "success", "data": serializer.data}, status=status.HTTP_200_OK)
 
@@ -420,3 +468,47 @@ class AdmissionApplicationView(APIView):
             "status": "error",
             "errors": serializer.errors
         }, status=status.HTTP_400_BAD_REQUEST)
+
+    def delete(self, request):
+        """
+        ADMIN ONLY ENDPOINT:
+        Allows Admin Dashboard to delete an admission application strictly via query parameters:
+        DELETE /api/admission-form/?id=8
+        or
+        DELETE /api/admission-form/?submission_id=33
+        """
+        app_id = request.query_params.get("id")
+        submission_id = request.query_params.get("submission_id")
+
+        if not app_id and not submission_id:
+            return Response({
+                "status": "error",
+                "message": "Either 'id' or 'submission_id' query parameter is required to delete an application."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if app_id:
+            application = AdmissionApplication.objects.filter(id=app_id).first()
+            if not application:
+                return Response({
+                    "status": "error",
+                    "message": f"Admission application with ID {app_id} not found."
+                }, status=status.HTTP_404_NOT_FOUND)
+        else:
+            application = AdmissionApplication.objects.filter(submission_id=submission_id).first()
+            if not application:
+                return Response({
+                    "status": "error",
+                    "message": f"Admission application for submission_id {submission_id} not found."
+                }, status=status.HTTP_404_NOT_FOUND)
+
+        app_number = application.application_number
+        application_id = application.id
+        application.delete()
+
+        logger.info(f"[DELETE /api/admission-form/] Application {app_number} (ID: {application_id}) deleted by Admin.")
+        return Response({
+            "status": "success",
+            "message": f"Application {app_number} deleted successfully.",
+            "deleted_id": application_id,
+            "application_number": app_number
+        }, status=status.HTTP_200_OK)

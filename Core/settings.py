@@ -26,6 +26,18 @@ DEBUG = os.getenv('DEBUG', 'True') == 'True'
 
 ALLOWED_HOSTS = ['*']
 
+# CSRF Trusted Origins for Azure App Service & DevTunnels
+CSRF_TRUSTED_ORIGINS = [
+    'https://*.azurewebsites.net',
+    'https://shreyashfoundation-e6eagcdeebbbhwgd.centralindia-01.azurewebsites.net',
+    'https://*.inc1.devtunnels.ms',
+    'http://localhost:8000',
+    'http://127.0.0.1:8000',
+]
+
+# Ensure secure proxy SSL header is trusted on Azure
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
 # CORS Configuration (Allows frontend React / Dev tunnels to send requests)
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
@@ -90,22 +102,22 @@ WSGI_APPLICATION = 'Core.wsgi.application'
 
 #for local 
 if DEBUG:
-    # DATABASES = {
-    #     'default': {
-    #         'ENGINE': 'django.db.backends.sqlite3',
-    #         'NAME': BASE_DIR / 'db.sqlite3',
-    #     }
-    # }
     DATABASES = {
         'default': {
-            'ENGINE': 'django.db.backends.postgresql',
-            'NAME': 'admissionshreyash',
-            'USER': 'hydjqkjgkz',
-            'PASSWORD': '$D1FJw3eZcyAJsPd',
-            'HOST': 'astroai-server.postgres.database.azure.com',
-            'PORT': '5432',
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
         }
     }
+    # DATABASES = {
+    #     'default': {
+    #         'ENGINE': 'django.db.backends.postgresql',
+    #         'NAME': 'admissionshreyash',
+    #         'USER': 'hydjqkjgkz',
+    #         'PASSWORD': '$D1FJw3eZcyAJsPd',
+    #         'HOST': 'astroai-server.postgres.database.azure.com',
+    #         'PORT': '5432',
+    #     }
+    # }
 
 else:
     CONNECTION_STRING = os.environ.get('AZURE_POSTGRESQL_CONNECTIONSTRING', "dbname=admissionshreyash host=astroai-server.postgres.database.azure.com port=5432 sslmode=require user=hydjqkjgkz password=$D1FJw3eZcyAJsPd")
