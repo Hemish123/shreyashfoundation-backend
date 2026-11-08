@@ -113,15 +113,15 @@ class SubmitQuizView(APIView):
                     "message": f"Admission form already submitted (App No: {existing_app.application_number})."
                 }, status=status.HTTP_400_BAD_REQUEST)
 
-            # Check if already passed quiz
-            if submission.qa_status == "PASSED":
+            # Check if quiz has already been submitted for this enquiry
+            if submission.qa_status in ["PASSED", "FAILED"]:
                 return Response({
                     "status": "error",
-                    "already_passed": True,
+                    "already_completed": True,
                     "submission_id": submission.id,
                     "score": submission.score,
                     "tag": submission.tag,
-                    "message": f"Quiz already passed with score {submission.score}/7 ({submission.tag})."
+                    "message": f"Quiz has already been completed for this student with score {submission.score}/7 ({submission.tag}). Re-attempting the quiz is not allowed."
                 }, status=status.HTTP_400_BAD_REQUEST)
 
             # Grade the submitted answers
