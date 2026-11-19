@@ -211,14 +211,23 @@ class SubmitQuizSerializer(serializers.Serializer):
 
 IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.webp')
 DOCUMENT_EXTENSIONS = ('.pdf', '.doc', '.docx', '.jpg', '.jpeg', '.png', '.webp')
+MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024  # 5 MB
 
 def validate_uploaded_image(file_obj, field_name: str):
     """
-    Validates that the uploaded file is strictly an image (JPG, JPEG, PNG, WEBP).
-    Rejects PDF, DOC, DOCX or corrupted image files.
+    Validates that the uploaded file is strictly an image (JPG, JPEG, PNG, WEBP)
+    and does not exceed 5 MB in size.
     """
     if not file_obj or isinstance(file_obj, str):
         return
+
+    # Check file size (5 MB limit)
+    file_size = getattr(file_obj, 'size', None)
+    if file_size and file_size > MAX_FILE_SIZE_BYTES:
+        size_mb = round(file_size / (1024 * 1024), 2)
+        raise serializers.ValidationError({
+            field_name: f"File size ({size_mb} MB) exceeds the 5 MB limit. Please upload a smaller file."
+        })
 
     file_name = getattr(file_obj, 'name', '').lower()
     if file_name and not file_name.endswith(IMAGE_EXTENSIONS):
@@ -242,10 +251,19 @@ def validate_uploaded_image(file_obj, field_name: str):
 
 def validate_uploaded_document(file_obj, field_name: str):
     """
-    Validates that the uploaded file is a valid Document (PDF, DOC, DOCX) or clear document scan/image (JPG, PNG).
+    Validates that the uploaded file is a valid Document (PDF, DOC, DOCX, JPG, PNG)
+    and does not exceed 5 MB in size.
     """
     if not file_obj or isinstance(file_obj, str):
         return
+
+    # Check file size (5 MB limit)
+    file_size = getattr(file_obj, 'size', None)
+    if file_size and file_size > MAX_FILE_SIZE_BYTES:
+        size_mb = round(file_size / (1024 * 1024), 2)
+        raise serializers.ValidationError({
+            field_name: f"File size ({size_mb} MB) exceeds the 5 MB limit. Please upload a file smaller than 5 MB."
+        })
 
     file_name = getattr(file_obj, 'name', '').lower()
     if file_name and not file_name.endswith(DOCUMENT_EXTENSIONS):
