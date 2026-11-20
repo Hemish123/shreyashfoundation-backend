@@ -8,6 +8,7 @@ class QuizSubmissionListSerializer(serializers.ModelSerializer):
     repeated_badge = serializers.SerializerMethodField()
     created_by_user = serializers.SerializerMethodField()
     added_by = serializers.SerializerMethodField()
+    ai_evaluations = serializers.SerializerMethodField()
 
     class Meta:
         model = QuizSubmission
@@ -28,6 +29,8 @@ class QuizSubmissionListSerializer(serializers.ModelSerializer):
             'is_eligible',
             'payment_status',
             'whatsapp_link_sent',
+            'answers',
+            'ai_evaluations',
             'quiz_completed_at',
             'created_at',
             'admission_submitted',
@@ -38,6 +41,11 @@ class QuizSubmissionListSerializer(serializers.ModelSerializer):
             'created_by_user',
             'added_by'
         ]
+
+    def get_ai_evaluations(self, obj):
+        if obj.answers and isinstance(obj.answers, dict):
+            return obj.answers.get("ai_evaluations", {})
+        return {}
 
     def get_created_by_user(self, obj):
         if obj.created_by:
