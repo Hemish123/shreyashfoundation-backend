@@ -10,7 +10,7 @@ from datetime import timedelta
 from django.shortcuts import get_object_or_404
 from django.conf import settings
 from django.db import models
-from django.db.models import Q
+from django.db.models import Q, Count, Case, When, IntegerField
 from django.utils import timezone
 from django.core.mail import send_mail
 from typing import Optional
@@ -1153,17 +1153,27 @@ class SubmitQuizView(APIView):
         if role != 'ADMIN' and logged_in_admin:
             base_queryset = base_queryset.filter(created_by=logged_in_admin)
 
-        # All-over card summary counts (Across entire system / scoped role, NOT limited by page or active search/filter)
-        all_total_enquiries = base_queryset.count()
-        all_fees_collected = base_queryset.filter(payment_status="RECEIVED").count()
-        all_fee_unpaid = base_queryset.exclude(payment_status="RECEIVED").count()
-        all_qa_passed = base_queryset.filter(qa_status="PASSED").count()
-        all_qa_failed = base_queryset.filter(qa_status="FAILED").count()
-        all_qa_pending = base_queryset.filter(qa_status="PENDING").count()
-        all_submitted_forms = base_queryset.filter(admission_application__isnull=False).count()
-        all_pending_forms = base_queryset.filter(payment_status="RECEIVED", admission_application__isnull=True).count()
+        # FAST HIGH-PERFORMANCE AGGREGATION: Single SQL query instead of 8 separate DB hits
+        stats = base_queryset.aggregate(
+            all_total=Count('id'),
+            all_fees_collected=Count(Case(When(payment_status='RECEIVED', then=1), output_field=IntegerField())),
+            all_qa_passed=Count(Case(When(qa_status='PASSED', then=1), output_field=IntegerField())),
+            all_qa_failed=Count(Case(When(qa_status='FAILED', then=1), output_field=IntegerField())),
+            all_qa_pending=Count(Case(When(qa_status='PENDING', then=1), output_field=IntegerField())),
+            all_submitted_forms=Count(Case(When(admission_application__isnull=False, then=1), output_field=IntegerField())),
+            all_pending_forms=Count(Case(When(payment_status='RECEIVED', admission_application__isnull=True, then=1), output_field=IntegerField()))
+        )
 
-        queryset = base_queryset.order_by("-created_at")
+        all_total_enquiries = stats['all_total'] or 0
+        all_fees_collected = stats['all_fees_collected'] or 0
+        all_fee_unpaid = all_total_enquiries - all_fees_collected
+        all_qa_passed = stats['all_qa_passed'] or 0
+        all_qa_failed = stats['all_qa_failed'] or 0
+        all_qa_pending = stats['all_qa_pending'] or 0
+        all_submitted_forms = stats['all_submitted_forms'] or 0
+        all_pending_forms = stats['all_pending_forms'] or 0
+
+        queryset = base_queryset.select_related('created_by').order_by("-created_at")
 
         vibhag = request.query_params.get("vibhag")
         if vibhag:
@@ -1237,14 +1247,24 @@ class SubmitQuizView(APIView):
             start_of_month = now - timedelta(days=30)
             queryset = queryset.filter(created_at__gte=start_of_month)
 
-        # Filtered query count (for table pagination)
-        filtered_count = queryset.count()
-        filtered_fees_collected = queryset.filter(payment_status="RECEIVED").count()
-        filtered_qa_passed = queryset.filter(qa_status="PASSED").count()
-        filtered_qa_failed = queryset.filter(qa_status="FAILED").count()
-        filtered_qa_pending = queryset.filter(qa_status="PENDING").count()
-        filtered_submitted_forms = queryset.filter(admission_application__isnull=False).count()
-        filtered_pending_forms = queryset.filter(payment_status="RECEIVED", admission_application__isnull=True).count()
+        # Filtered count and stats: Single SQL aggregate query (Zero server overhead)
+        filtered_stats = queryset.aggregate(
+            filtered_count=Count('id'),
+            filtered_fees_collected=Count(Case(When(payment_status='RECEIVED', then=1), output_field=IntegerField())),
+            filtered_qa_passed=Count(Case(When(qa_status='PASSED', then=1), output_field=IntegerField())),
+            filtered_qa_failed=Count(Case(When(qa_status='FAILED', then=1), output_field=IntegerField())),
+            filtered_qa_pending=Count(Case(When(qa_status='PENDING', then=1), output_field=IntegerField())),
+            filtered_submitted_forms=Count(Case(When(admission_application__isnull=False, then=1), output_field=IntegerField())),
+            filtered_pending_forms=Count(Case(When(payment_status='RECEIVED', admission_application__isnull=True, then=1), output_field=IntegerField()))
+        )
+
+        filtered_count = filtered_stats['filtered_count'] or 0
+        filtered_fees_collected = filtered_stats['filtered_fees_collected'] or 0
+        filtered_qa_passed = filtered_stats['filtered_qa_passed'] or 0
+        filtered_qa_failed = filtered_stats['filtered_qa_failed'] or 0
+        filtered_qa_pending = filtered_stats['filtered_qa_pending'] or 0
+        filtered_submitted_forms = filtered_stats['filtered_submitted_forms'] or 0
+        filtered_pending_forms = filtered_stats['filtered_pending_forms'] or 0
 
         # Pagination support (defaults to page 1, 50 records per page)
         page = int(request.query_params.get("page", 1))
