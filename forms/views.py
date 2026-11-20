@@ -1,6 +1,7 @@
 import logging
 import json
 import random
+import re
 import os
 import requests
 import threading
@@ -715,7 +716,13 @@ class AdminExportDataView(APIView):
         _, logged_in_admin, role = get_authenticated_admin_user(request)
 
         export_type = (request.query_params.get("type") or request.GET.get("type") or "enquiries").lower().strip()
-        period = (request.query_params.get("period") or request.GET.get("period") or "all").lower().strip()
+        period = (
+            request.query_params.get("period") or
+            request.query_params.get("time_range") or
+            request.GET.get("period") or
+            request.GET.get("time_range") or
+            "all"
+        ).lower().strip()
         # Accept 'export_format', 'file_format', or fallback to 'format'
         export_format = (
             request.query_params.get("export_format") or
@@ -729,11 +736,11 @@ class AdminExportDataView(APIView):
         now = timezone.now()
         start_date = None
 
-        if period == "today":
+        if period in ["today", "1day"]:
             start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        elif period == "week":
+        elif period in ["week", "this_week", "this week", "7days"]:
             start_date = now - timedelta(days=7)
-        elif period == "month":
+        elif period in ["month", "this_month", "this month", "30days"]:
             start_date = now - timedelta(days=30)
 
         # 1. Base Queryset Filtering
@@ -1142,17 +1149,33 @@ class SubmitQuizView(APIView):
             serializer = QuizSubmissionListSerializer(submission)
             return Response({"status": "success", "data": serializer.data}, status=status.HTTP_200_OK)
 
-        queryset = QuizSubmission.objects.all().order_by("-created_at")
-
-        # Role-based scoping:
-        # ADMIN sees everything.
-        # Other roles (STAFF, ACADEMICIAN) see only their own created enquiries.
+        base_queryset = QuizSubmission.objects.all()
         if role != 'ADMIN' and logged_in_admin:
-            queryset = queryset.filter(created_by=logged_in_admin)
+            base_queryset = base_queryset.filter(created_by=logged_in_admin)
+
+        # All-over card summary counts (Across entire system / scoped role, NOT limited by page or active search/filter)
+        all_total_enquiries = base_queryset.count()
+        all_fees_collected = base_queryset.filter(payment_status="RECEIVED").count()
+        all_fee_unpaid = base_queryset.exclude(payment_status="RECEIVED").count()
+        all_qa_passed = base_queryset.filter(qa_status="PASSED").count()
+        all_qa_failed = base_queryset.filter(qa_status="FAILED").count()
+        all_qa_pending = base_queryset.filter(qa_status="PENDING").count()
+        all_submitted_forms = base_queryset.filter(admission_application__isnull=False).count()
+        all_pending_forms = base_queryset.filter(payment_status="RECEIVED", admission_application__isnull=True).count()
+
+        queryset = base_queryset.order_by("-created_at")
 
         vibhag = request.query_params.get("vibhag")
         if vibhag:
             queryset = queryset.filter(vibhag__iexact=vibhag)
+
+        standard = request.query_params.get("standard")
+        if standard:
+            queryset = queryset.filter(standard__iexact=standard)
+
+        medium = request.query_params.get("medium")
+        if medium:
+            queryset = queryset.filter(medium__iexact=medium)
 
         is_eligible = request.query_params.get("is_eligible")
         if is_eligible is not None:
@@ -1162,14 +1185,66 @@ class SubmitQuizView(APIView):
         if payment_status:
             queryset = queryset.filter(payment_status__iexact=payment_status)
 
-        # Card summary counts (calculated on full filtered queryset before slicing)
-        total_count = queryset.count()
-        fees_collected = queryset.filter(payment_status="RECEIVED").count()
-        qa_passed = queryset.filter(qa_status="PASSED").count()
-        qa_failed = queryset.filter(qa_status="FAILED").count()
-        qa_pending = queryset.filter(qa_status="PENDING").count()
-        submitted_forms = queryset.filter(admission_application__isnull=False).count()
-        pending_forms = queryset.filter(payment_status="RECEIVED", admission_application__isnull=True).count()
+        # Global Search Query (?search=... or ?q=...)
+        search_query = (request.query_params.get("search") or request.query_params.get("q") or "").strip()
+        if search_query:
+            clean_search_digits = re.sub(r"\D", "", search_query)
+            search_filter = (
+                Q(child_name__icontains=search_query) |
+                Q(parent_name__icontains=search_query) |
+                Q(surname__icontains=search_query) |
+                Q(whatsapp_number__icontains=search_query) |
+                Q(email__icontains=search_query) |
+                Q(standard__icontains=search_query) |
+                Q(vibhag__icontains=search_query)
+            )
+            if clean_search_digits:
+                search_filter |= Q(whatsapp_number__icontains=clean_search_digits)
+            if search_query.isdigit():
+                search_filter |= Q(id=int(search_query))
+            queryset = queryset.filter(search_filter)
+
+        # Quick Dropdown Filter (?filter=... or ?status=...)
+        # Matches frontend dropdown options:
+        # 'all', 'fees_paid', 'fees_unpaid', 'quiz_passed', 'quiz_failed', 'quiz_pending', 'pending_forms', 'submitted_forms'
+        dropdown_filter = (request.query_params.get("filter") or request.query_params.get("status") or "").strip().lower()
+        if dropdown_filter in ['fees_paid', 'fees paid', 'paid']:
+            queryset = queryset.filter(payment_status="RECEIVED")
+        elif dropdown_filter in ['fees_unpaid', 'fees unpaid', 'unpaid', 'fee unpaid']:
+            queryset = queryset.exclude(payment_status="RECEIVED")
+        elif dropdown_filter in ['quiz_passed', 'quiz passed', 'passed']:
+            queryset = queryset.filter(qa_status="PASSED")
+        elif dropdown_filter in ['quiz_failed', 'quiz failed', 'failed']:
+            queryset = queryset.filter(qa_status="FAILED")
+        elif dropdown_filter in ['quiz_pending', 'quiz pending']:
+            queryset = queryset.filter(qa_status="PENDING")
+        elif dropdown_filter in ['pending_forms', 'pending forms', 'pending']:
+            queryset = queryset.filter(payment_status="RECEIVED", admission_application__isnull=True)
+        elif dropdown_filter in ['submitted_forms', 'submitted forms', 'submitted']:
+            queryset = queryset.filter(admission_application__isnull=False)
+
+        # Time range filter (?time_range=... or ?period=...)
+        # Matches 'today', 'this_week', 'this_month', 'all_time'
+        time_range = (request.query_params.get("time_range") or request.query_params.get("period") or "").strip().lower()
+        now = timezone.now()
+        if time_range in ['today', '1day']:
+            start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            queryset = queryset.filter(created_at__gte=start_of_day)
+        elif time_range in ['this_week', 'week', '7days']:
+            start_of_week = now - timedelta(days=7)
+            queryset = queryset.filter(created_at__gte=start_of_week)
+        elif time_range in ['this_month', 'month', '30days']:
+            start_of_month = now - timedelta(days=30)
+            queryset = queryset.filter(created_at__gte=start_of_month)
+
+        # Filtered query count (for table pagination)
+        filtered_count = queryset.count()
+        filtered_fees_collected = queryset.filter(payment_status="RECEIVED").count()
+        filtered_qa_passed = queryset.filter(qa_status="PASSED").count()
+        filtered_qa_failed = queryset.filter(qa_status="FAILED").count()
+        filtered_qa_pending = queryset.filter(qa_status="PENDING").count()
+        filtered_submitted_forms = queryset.filter(admission_application__isnull=False).count()
+        filtered_pending_forms = queryset.filter(payment_status="RECEIVED", admission_application__isnull=True).count()
 
         # Pagination support (defaults to page 1, 50 records per page)
         page = int(request.query_params.get("page", 1))
@@ -1179,7 +1254,7 @@ class SubmitQuizView(APIView):
         if page_size < 1:
             page_size = 50
 
-        total_pages = (total_count + page_size - 1) // page_size if total_count > 0 else 1
+        total_pages = (filtered_count + page_size - 1) // page_size if filtered_count > 0 else 1
         offset = (page - 1) * page_size
         paged_queryset = queryset[offset:offset + page_size]
 
@@ -1192,20 +1267,33 @@ class SubmitQuizView(APIView):
             "pagination": {
                 "page": page,
                 "page_size": page_size,
-                "total_records": total_count,
+                "total_records": filtered_count,
                 "total_pages": total_pages,
                 "has_next": page < total_pages,
                 "has_previous": page > 1
             },
-            "total_enquiries": total_count,
+            # Top Stats Cards / Tabs: Always All-Over Total Counts (NOT cut by page or table filter)
+            "total_enquiries": all_total_enquiries,
+            "fees_collected": all_fees_collected,
+            "fee_unpaid": all_fee_unpaid,
+            "qa_passed": all_qa_passed,
+            "qa_failed": all_qa_failed,
+            "qa_pending": all_qa_pending,
+            "submitted_forms": all_submitted_forms,
+            "pending_forms": all_pending_forms,
+            # Filtered / Table statistics
+            "filtered_records": filtered_count,
             "returned_enquiries": len(serializer.data),
-            "fees_collected": fees_collected,
-            "fee_unpaid": total_count - fees_collected,
-            "qa_passed": qa_passed,
-            "qa_failed": qa_failed,
-            "qa_pending": qa_pending,
-            "submitted_forms": submitted_forms,
-            "pending_forms": pending_forms,
+            "filtered_stats": {
+                "total": filtered_count,
+                "fees_collected": filtered_fees_collected,
+                "fee_unpaid": filtered_count - filtered_fees_collected,
+                "qa_passed": filtered_qa_passed,
+                "qa_failed": filtered_qa_failed,
+                "qa_pending": filtered_qa_pending,
+                "submitted_forms": filtered_submitted_forms,
+                "pending_forms": filtered_pending_forms
+            },
             "data": serializer.data
         }, status=status.HTTP_200_OK)
 
@@ -1889,12 +1977,110 @@ class AdmissionApplicationView(APIView):
         if role != 'ADMIN' and logged_in_admin:
             applications = applications.filter(submission__created_by=logged_in_admin)
 
-        serializer = AdmissionApplicationSerializer(applications, many=True)
+        # Filters for Admission Applications
+        standard = request.query_params.get("standard")
+        if standard:
+            applications = applications.filter(standard__iexact=standard)
+
+        vibhag = request.query_params.get("vibhag")
+        if vibhag:
+            applications = applications.filter(vibhag__iexact=vibhag)
+
+        medium = request.query_params.get("medium")
+        if medium:
+            applications = applications.filter(medium__iexact=medium)
+
+        admission_status = request.query_params.get("admission_status")
+        if admission_status:
+            applications = applications.filter(admission_status__iexact=admission_status)
+
+        # Quick Pill Filter (?filter=... or ?status=...)
+        # Matches frontend pills: 'all', 'pass' / 'passed', 'fail' / 'failed'
+        tab_filter = (request.query_params.get("filter") or request.query_params.get("status") or "").strip().lower()
+        if tab_filter in ['pass', 'passed']:
+            applications = applications.filter(submission__qa_status="PASSED")
+        elif tab_filter in ['fail', 'failed']:
+            applications = applications.filter(submission__qa_status="FAILED")
+
+        # Time range filter (?time_range=... or ?period=...)
+        # Matches frontend dropdown: 'today', 'this_week', 'this_month', 'all_time'
+        time_range = (request.query_params.get("time_range") or request.query_params.get("period") or "").strip().lower()
+        now = timezone.now()
+        if time_range in ['today', '1day']:
+            start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            applications = applications.filter(created_at__gte=start_of_day)
+        elif time_range in ['this_week', 'this week', 'week', '7days']:
+            start_of_week = now - timedelta(days=7)
+            applications = applications.filter(created_at__gte=start_of_week)
+        elif time_range in ['this_month', 'this month', 'month', '30days']:
+            start_of_month = now - timedelta(days=30)
+            applications = applications.filter(created_at__gte=start_of_month)
+
+        # Search Query (?search=... or ?q=...)
+        search_query = (request.query_params.get("search") or request.query_params.get("q") or "").strip()
+        if search_query:
+            clean_search_digits = re.sub(r"\D", "", search_query)
+            app_search_filter = (
+                Q(application_number__icontains=search_query) |
+                Q(child_first_name__icontains=search_query) |
+                Q(child_father_name__icontains=search_query) |
+                Q(child_surname__icontains=search_query) |
+                Q(mother_name__icontains=search_query) |
+                Q(mother_surname__icontains=search_query) |
+                Q(mother_whatsapp__icontains=search_query) |
+                Q(submission__parent_name__icontains=search_query) |
+                Q(submission__whatsapp_number__icontains=search_query) |
+                Q(standard__icontains=search_query) |
+                Q(vibhag__icontains=search_query)
+            )
+            if clean_search_digits:
+                app_search_filter |= Q(mother_whatsapp__icontains=clean_search_digits)
+                app_search_filter |= Q(submission__whatsapp_number__icontains=clean_search_digits)
+            if search_query.isdigit():
+                app_search_filter |= Q(id=int(search_query))
+                app_search_filter |= Q(submission_id=int(search_query))
+            applications = applications.filter(app_search_filter)
+
+        # Summary Counts (for UI badges: All, Pass, Fail)
+        base_qs = AdmissionApplication.objects.all()
+        if role != 'ADMIN' and logged_in_admin:
+            base_qs = base_qs.filter(submission__created_by=logged_in_admin)
+        all_count = base_qs.count()
+        pass_count = base_qs.filter(submission__qa_status="PASSED").count()
+        fail_count = base_qs.filter(submission__qa_status="FAILED").count()
+
+        # Pagination support (defaults to page 1, 50 records per page)
+        total_count = applications.count()
+        page = int(request.query_params.get("page", 1))
+        page_size = int(request.query_params.get("page_size", request.query_params.get("limit", 50)))
+        if page < 1:
+            page = 1
+        if page_size < 1:
+            page_size = 50
+
+        total_pages = (total_count + page_size - 1) // page_size if total_count > 0 else 1
+        offset = (page - 1) * page_size
+        paged_applications = applications[offset:offset + page_size]
+
+        serializer = AdmissionApplicationSerializer(paged_applications, many=True)
         return Response({
             "status": "success",
             "scope": "ALL" if role == 'ADMIN' else "MY_APPLICATIONS",
             "user_role": role,
-            "total_applications": applications.count(),
+            "counts": {
+                "all": all_count,
+                "pass": pass_count,
+                "fail": fail_count
+            },
+            "pagination": {
+                "page": page,
+                "page_size": page_size,
+                "total_records": total_count,
+                "total_pages": total_pages,
+                "has_next": page < total_pages,
+                "has_previous": page > 1
+            },
+            "total_applications": total_count,
             "data": serializer.data
         }, status=status.HTTP_200_OK)
 
