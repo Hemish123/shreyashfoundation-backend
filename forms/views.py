@@ -1944,7 +1944,7 @@ class AdmissionApplicationView(APIView):
                     date_str=slot_info["date_str"],
                     slot_no=slot_info["slot_no"],
                     time_str=slot_info["time"],
-                    template_name="shreyas_interaction_scheduled"
+                    template_name="shreyas_interaction_scheduled_"
                 )
                 wa_sent = wa_response.get("success", False)
                 application.interaction_whatsapp_sent = wa_sent
@@ -2170,11 +2170,11 @@ class AdmissionApplicationView(APIView):
                             date_str=slot_date_str,
                             slot_no=updated_app.interaction_slot_no,
                             time_str=updated_app.interaction_time,
-                            template_name="shreyas_interaction_rescheduled"
+                            template_name="shreyas_interaction_rescheduled_"
                         )
                         wa_sent = wa_response.get("success", False)
                         updated_app.interaction_whatsapp_sent = wa_sent
-                        logger.info(f"[ADMIN SLOT NOTIF] WhatsApp template 'shreyas_interaction_rescheduled' dispatched to {parent_phone}: success={wa_sent}")
+                        logger.info(f"[ADMIN SLOT NOTIF] WhatsApp template 'shreyas_interaction_rescheduled_' dispatched to {parent_phone}: success={wa_sent}")
 
                     updated_app.save(update_fields=[
                         'interaction_date',
