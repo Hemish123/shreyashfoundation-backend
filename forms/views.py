@@ -976,8 +976,40 @@ class AdminProxyDownloadView(APIView):
         content_type, _ = mimetypes.guess_type(custom_filename)
         content_type = content_type or "application/octet-stream"
 
+        # If Azure Blob URL from our storage account and account key is available,
+        # attach a temporary SAS token so private/restricted blobs can be securely read by backend
+        download_target_url = file_url
+        if settings.AZURE_ACCOUNT_NAME and settings.AZURE_ACCOUNT_KEY and settings.AZURE_ACCOUNT_NAME in parsed.netloc:
+            # Check if SAS token already present in query params
+            if "sig=" not in file_url:
+                try:
+                    from datetime import datetime, timedelta, timezone as dt_tz
+                    from azure.storage.blob import generate_blob_sas, BlobSasPermissions
+                    
+                    # Extract blob_name by removing leading container name from path
+                    # e.g., /media/documents/photo.jpg -> documents/photo.jpg
+                    clean_path = parsed.path.lstrip('/')
+                    container_prefix = f"{settings.AZURE_CONTAINER}/"
+                    if clean_path.startswith(container_prefix):
+                        blob_name = clean_path[len(container_prefix):]
+                    else:
+                        blob_name = clean_path
+
+                    sas_token = generate_blob_sas(
+                        account_name=settings.AZURE_ACCOUNT_NAME,
+                        container_name=settings.AZURE_CONTAINER,
+                        blob_name=blob_name,
+                        account_key=settings.AZURE_ACCOUNT_KEY,
+                        permission=BlobSasPermissions(read=True),
+                        expiry=datetime.now(dt_tz.utc) + timedelta(minutes=15)
+                    )
+                    separator = "&" if "?" in file_url else "?"
+                    download_target_url = f"{file_url}{separator}{sas_token}"
+                except Exception as sas_err:
+                    logger.warning(f"[PROXY DOWNLOAD] Could not generate SAS token: {sas_err}")
+
         try:
-            r = requests.get(file_url, stream=True, timeout=25)
+            r = requests.get(download_target_url, stream=True, timeout=25)
             if r.status_code != 200:
                 logger.error(f"[PROXY DOWNLOAD ERROR] Storage returned status {r.status_code} for {file_url}")
                 return Response({
