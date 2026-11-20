@@ -927,6 +927,80 @@ class AdminExportDataView(APIView):
         return response
 
 
+class AdminProxyDownloadView(APIView):
+    """
+    Proxy Download API for Azure Blob Storage files:
+    Resolves CORS issues when downloading photos, signatures, or documents from frontend.
+    GET /api/admin/download-file/?url=<blob_url>&filename=<custom_name>
+    """
+    def get(self, request):
+        denied = enforce_admin_token(request)
+        if denied:
+            return denied
+
+        file_url = (request.query_params.get("url") or "").strip()
+        custom_filename = (request.query_params.get("filename") or "").strip()
+
+        if not file_url:
+            return Response({
+                "status": "error",
+                "message": "Query parameter 'url' is required."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Security check: Allow files from Azure Blob Storage or local media
+        from urllib.parse import urlparse
+        import mimetypes
+        import requests
+        from django.http import HttpResponse, StreamingHttpResponse
+
+        parsed = urlparse(file_url)
+        allowed_hosts = [
+            f"{settings.AZURE_ACCOUNT_NAME}.blob.core.windows.net",
+            "shreyasfoundation.blob.core.windows.net",
+            "localhost",
+            "127.0.0.1"
+        ]
+
+        if parsed.netloc and not any(allowed in parsed.netloc.lower() for allowed in allowed_hosts):
+            return Response({
+                "status": "error",
+                "message": f"Downloads are only permitted from verified storage hosts ({', '.join(allowed_hosts)})."
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        # Derive clean filename if not specified
+        if not custom_filename:
+            path_segments = parsed.path.rstrip('/').split('/')
+            custom_filename = path_segments[-1] if path_segments else "downloaded_file"
+
+        # Guess mime type
+        content_type, _ = mimetypes.guess_type(custom_filename)
+        content_type = content_type or "application/octet-stream"
+
+        try:
+            r = requests.get(file_url, stream=True, timeout=25)
+            if r.status_code != 200:
+                logger.error(f"[PROXY DOWNLOAD ERROR] Storage returned status {r.status_code} for {file_url}")
+                return Response({
+                    "status": "error",
+                    "message": f"Failed to fetch file from storage (HTTP {r.status_code})."
+                }, status=status.HTTP_502_BAD_GATEWAY)
+
+            response = StreamingHttpResponse(
+                r.iter_content(chunk_size=8192),
+                content_type=r.headers.get('Content-Type') or content_type
+            )
+            response['Content-Disposition'] = f'attachment; filename="{custom_filename}"'
+            response['Access-Control-Expose-Headers'] = 'Content-Disposition'
+            return response
+
+        except Exception as e:
+            logger.exception(f"[PROXY DOWNLOAD EXCEPTION] {str(e)}")
+            return Response({
+                "status": "error",
+                "message": f"Error downloading file: {str(e)}"
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 class AdminAuditLogView(APIView):
     """
     Audit Logs: Strictly restricted to users with role 'ADMIN'.

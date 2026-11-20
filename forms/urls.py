@@ -18,7 +18,8 @@ from .views import (
     AdminMeritCancellationView,
     ParentConfirmInteractionSlotView,
     AdminPrintPhysicalFormView,
-    AdminAcademicYearRollView
+    AdminAcademicYearRollView,
+    AdminProxyDownloadView
 )
 
 urlpatterns = [
@@ -57,6 +58,9 @@ urlpatterns = [
 
     # Admin Audit Logs (Only accessible by Admin)
     path('admin/audit-logs/', AdminAuditLogView.as_view(), name='admin-audit-logs'),
+
+    # Admin Proxy File Download (Resolves Azure Blob CORS on direct downloads)
+    path('admin/download-file/', AdminProxyDownloadView.as_view(), name='admin-download-file'),
 
     # Enquiries & Quiz
     path('submit-quiz/', SubmitQuizView.as_view(), name='submit-quiz'),
