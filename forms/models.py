@@ -2,6 +2,7 @@ from django.db import models
 
 class QuizSubmission(models.Model):
     STANDARD_CHOICES = [
+        ('Playgroup', 'Playgroup'),
         ('Nursery', 'Nursery'),
         ('Jr.KG', 'Jr.KG'),
         ('Sr.KG', 'Sr.KG'),

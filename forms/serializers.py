@@ -159,6 +159,10 @@ class SubmitQuizSerializer(serializers.Serializer):
 
             # Mapping of standard/class to official Shreyas Vibhag
             vibhag_map = {
+                'pg': ('Playgroup', 'Shishu'),
+                'playgroup': ('Playgroup', 'Shishu'),
+                'play group': ('Playgroup', 'Shishu'),
+                'play-group': ('Playgroup', 'Shishu'),
                 'nursery': ('Nursery', 'Shishu'),
                 'jr.kg': ('Jr.KG', 'Shishu'),
                 'sr.kg': ('Sr.KG', 'Arun'),
