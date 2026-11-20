@@ -8,11 +8,10 @@ from django.conf import settings
 logger = logging.getLogger(__name__)
 
 
-def trigger_saas_crm_template(phone: str, template_name: str, parameters: dict = None, language: str = "en", submission_id: int = None) -> dict:
+def trigger_saas_crm_template(phone: str, template_name: str, parameters: dict = None, language: str = "en", submission_id: int = None, message_id: str = None) -> dict:
     """
-    Triggers template dispatch via external WhatsApp CRM SaaS webhook.
-    Endpoint: WHATSAPP_CRM_TRIGGER_URL (from .env)
-    Payload structured inside Meta webhook format with phone_number_id.
+    Notifies external WhatsApp CRM SaaS webhook to log/display the template.
+    If message_id is provided, CRM enters 'LOG_TEMPLATE' mode (no duplicate dispatch to Meta).
     """
     crm_url = os.getenv("WHATSAPP_CRM_TRIGGER_URL", "").strip()
     if not crm_url:
@@ -21,6 +20,19 @@ def trigger_saas_crm_template(phone: str, template_name: str, parameters: dict =
     clean_phone = normalize_phone_number(phone)
     phone_number_id = getattr(settings, 'WHATSAPP_PHONE_NUMBER_ID', '1481244255068012')
     callback_url = "https://shreyashfoundation-e6eagcdeebbbhwgd.centralindia-01.azurewebsites.net/api/whatsapp/webhook/"
+
+    msg_payload = {
+        "event": "LOG_TEMPLATE" if message_id else "TRIGGER_TEMPLATE",
+        "phone": clean_phone,
+        "template_name": template_name,
+        "language": language or "en",
+        "parameters": parameters or {},
+        "submission_id": submission_id,
+        "webhook_callback_url": callback_url
+    }
+    if message_id:
+        msg_payload["message_id"] = message_id
+        msg_payload["log_only"] = True
 
     payload = {
         "object": "whatsapp_business_account",
@@ -33,17 +45,7 @@ def trigger_saas_crm_template(phone: str, template_name: str, parameters: dict =
                             "metadata": {
                                 "phone_number_id": str(phone_number_id)
                             },
-                            "messages": [
-                                {
-                                    "event": "TRIGGER_TEMPLATE",
-                                    "phone": clean_phone,
-                                    "template_name": template_name,
-                                    "language": language or "en",
-                                    "parameters": parameters or {},
-                                    "submission_id": submission_id,
-                                    "webhook_callback_url": callback_url
-                                }
-                            ]
+                            "messages": [msg_payload]
                         }
                     }
                 ]
@@ -52,9 +54,9 @@ def trigger_saas_crm_template(phone: str, template_name: str, parameters: dict =
     }
 
     try:
-        logger.info(f"[SAAS CRM DISPATCH] Triggering template '{template_name}' for {clean_phone} via {crm_url}")
+        logger.info(f"[SAAS CRM LOG] Logging template '{template_name}' (MsgID: {message_id}) for {clean_phone} via CRM")
         res = requests.post(crm_url, json=payload, headers={"Content-Type": "application/json"}, timeout=10)
-        logger.info(f"[SAAS CRM DISPATCH] Response code: {res.status_code}, text: {res.text[:300]}")
+        logger.info(f"[SAAS CRM LOG] Response code: {res.status_code}")
         if res.status_code in [200, 201, 202]:
             try:
                 res_json = res.json()
@@ -62,10 +64,10 @@ def trigger_saas_crm_template(phone: str, template_name: str, parameters: dict =
                 res_json = {"raw": res.text}
             return {"success": True, "via_crm": True, "data": res_json, "recipient": clean_phone}
         else:
-            logger.warning(f"[SAAS CRM DISPATCH] Failed with code {res.status_code}: {res.text}")
+            logger.warning(f"[SAAS CRM LOG] CRM responded with code {res.status_code}: {res.text[:200]}")
             return {"success": False, "error": f"CRM responded with status {res.status_code}"}
     except Exception as e:
-        logger.error(f"[SAAS CRM DISPATCH] Exception: {e}")
+        logger.error(f"[SAAS CRM LOG] Exception: {e}")
         return {"success": False, "error": str(e)}
 
 
@@ -124,19 +126,9 @@ def send_whatsapp_template_message(recipient_number: str, submission_id: int, te
     """
     Sends WhatsApp message using Meta Approved Template ('shreyas_admission__' or 'shreyas_admission_reminder_')
     with Dynamic Button URL containing submission_id.
+    Sends directly to Meta first, then logs in CRM SaaS (no duplicate!).
     """
     clean_phone = normalize_phone_number(recipient_number)
-
-    # 1. Attempt dispatch via connected WhatsApp CRM SaaS first
-    crm_res = trigger_saas_crm_template(
-        phone=clean_phone,
-        template_name=template_name,
-        submission_id=submission_id,
-        parameters={"1": str(submission_id)},
-        language="en"
-    )
-    if crm_res and crm_res.get("success"):
-        return crm_res
 
     phone_number_id = getattr(settings, 'WHATSAPP_PHONE_NUMBER_ID', '')
     access_token = getattr(settings, 'WHATSAPP_ACCESS_TOKEN', '')
@@ -151,8 +143,6 @@ def send_whatsapp_template_message(recipient_number: str, submission_id: int, te
         "Content-Type": "application/json"
     }
 
-    # Payload matching Meta template button URL:
-    # Dynamic button parameter: submission_id (e.g. "1")
     payload = {
         "messaging_product": "whatsapp",
         "recipient_type": "individual",
@@ -189,7 +179,22 @@ def send_whatsapp_template_message(recipient_number: str, submission_id: int, te
         logger.info(f"WhatsApp Template '{template_name}' response for {clean_phone}: status {response.status_code} - {res_data}")
 
         if response.status_code == 200:
-            return {"success": True, "template": template_name, "data": res_data, "recipient": clean_phone}
+            # Extract Meta Message ID (wamid)
+            msg_id = ""
+            if isinstance(res_data, dict) and res_data.get("messages"):
+                msg_id = res_data["messages"][0].get("id", "")
+
+            # Log into CRM asynchronously so it shows in CRM without duplicate sending
+            trigger_saas_crm_template(
+                phone=clean_phone,
+                template_name=template_name,
+                submission_id=submission_id,
+                parameters={"1": str(submission_id)},
+                language="en",
+                message_id=msg_id
+            )
+
+            return {"success": True, "template": template_name, "data": res_data, "recipient": clean_phone, "message_id": msg_id}
         else:
             logger.error(f"WhatsApp Template '{template_name}' failed for {clean_phone}: {res_data}")
             return {"success": False, "template": template_name, "error": res_data, "recipient": clean_phone}
@@ -204,6 +209,7 @@ def send_whatsapp_booklet_template(recipient_number: str, language: str = "gu", 
     - English: 'shreyas_booklet_en'
     - Gujarati: 'shreyas_booklet_gu'
     Header: Document PDF attachment.
+    Sends directly to Meta first, then logs in CRM SaaS (no duplicate!).
     """
     clean_phone = normalize_phone_number(recipient_number)
     phone_number_id = getattr(settings, 'WHATSAPP_PHONE_NUMBER_ID', '')
@@ -230,19 +236,6 @@ def send_whatsapp_booklet_template(recipient_number: str, language: str = "gu", 
             )
 
     file_name = "Shreyas_Booklet_Gujarati.pdf" if is_gujarati else "Shreyas_Booklet_English.pdf"
-
-    # 1. Attempt dispatch via connected WhatsApp CRM SaaS first
-    crm_res = trigger_saas_crm_template(
-        phone=clean_phone,
-        template_name=template_name,
-        parameters={
-            "document_url": pdf_url,
-            "filename": file_name
-        },
-        language="en"
-    )
-    if crm_res and crm_res.get("success"):
-        return crm_res
 
     url = f"https://graph.facebook.com/v21.0/{phone_number_id}/messages"
     headers = {
@@ -289,7 +282,23 @@ def send_whatsapp_booklet_template(recipient_number: str, language: str = "gu", 
         logger.info(f"WhatsApp Booklet Template response for {clean_phone}: status {response.status_code} - {res_data}")
 
         if response.status_code == 200:
-            return {"success": True, "template": template_name, "data": res_data, "recipient": clean_phone}
+            msg_id = ""
+            if isinstance(res_data, dict) and res_data.get("messages"):
+                msg_id = res_data["messages"][0].get("id", "")
+
+            # Log into CRM asynchronously
+            trigger_saas_crm_template(
+                phone=clean_phone,
+                template_name=template_name,
+                parameters={
+                    "document_url": pdf_url,
+                    "filename": file_name
+                },
+                language="en",
+                message_id=msg_id
+            )
+
+            return {"success": True, "template": template_name, "data": res_data, "recipient": clean_phone, "message_id": msg_id}
         else:
             logger.error(f"WhatsApp Booklet Template failed for {clean_phone}: {res_data}")
             return {"success": False, "template": template_name, "error": res_data, "recipient": clean_phone}
@@ -339,27 +348,9 @@ def send_whatsapp_interaction_scheduled_message(
     """
     Sends WhatsApp notification to parents upon Admission Form submission
     with their scheduled Interaction Date, Slot No, and Time.
-
-    Template parameters:
-    {{1}} = Date (e.g. "17-11-2026")
-    {{2}} = Slot No (e.g. "Slot 1")
-    {{3}} = Time (e.g. "9:00 AM TO 10:00 AM")
+    Sends directly to Meta first, then logs in CRM SaaS (no duplicate!).
     """
     clean_phone = normalize_phone_number(recipient_number)
-
-    # 1. Attempt dispatch via connected WhatsApp CRM SaaS first
-    crm_res = trigger_saas_crm_template(
-        phone=clean_phone,
-        template_name=template_name,
-        parameters={
-            "1": str(date_str),
-            "2": str(slot_no),
-            "3": str(time_str)
-        },
-        language="en"
-    )
-    if crm_res and crm_res.get("success"):
-        return crm_res
     phone_number_id = getattr(settings, 'WHATSAPP_PHONE_NUMBER_ID', '')
     access_token = getattr(settings, 'WHATSAPP_ACCESS_TOKEN', '')
 
@@ -407,7 +398,24 @@ def send_whatsapp_interaction_scheduled_message(
         logger.info(f"Interaction WhatsApp response for {clean_phone}: status {response.status_code} - {res_data}")
 
         if response.status_code == 200:
-            return {"success": True, "template": template_name, "data": res_data, "recipient": clean_phone}
+            msg_id = ""
+            if isinstance(res_data, dict) and res_data.get("messages"):
+                msg_id = res_data["messages"][0].get("id", "")
+
+            # Log into CRM asynchronously
+            trigger_saas_crm_template(
+                phone=clean_phone,
+                template_name=template_name,
+                parameters={
+                    "1": str(date_str),
+                    "2": str(slot_no),
+                    "3": str(time_str)
+                },
+                language="en",
+                message_id=msg_id
+            )
+
+            return {"success": True, "template": template_name, "data": res_data, "recipient": clean_phone, "message_id": msg_id}
         else:
             logger.error(f"Interaction WhatsApp message failed for {clean_phone}: {res_data}")
             return {"success": False, "template": template_name, "error": res_data, "recipient": clean_phone}
