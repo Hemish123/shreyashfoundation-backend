@@ -19,7 +19,8 @@ from .views import (
     ParentConfirmInteractionSlotView,
     AdminPrintPhysicalFormView,
     AdminAcademicYearRollView,
-    AdminProxyDownloadView
+    AdminProxyDownloadView,
+    WhatsAppWebhookView
 )
 
 urlpatterns = [
@@ -72,4 +73,7 @@ urlpatterns = [
     path('admission-form/check-eligibility/', AdmissionFormEligibilityCheckView.as_view(), name='check-form-eligibility'),
     path('admission-form/autosave/', AdmissionFormAutoSaveDraftView.as_view(), name='admission-form-autosave'),
     path('admission-form/', AdmissionApplicationView.as_view(), name='admission-form'),
+
+    # WhatsApp SaaS & Meta Two-Way Webhook (Single Universal URL)
+    path('whatsapp/webhook/', WhatsAppWebhookView.as_view(), name='whatsapp-webhook'),
 ]

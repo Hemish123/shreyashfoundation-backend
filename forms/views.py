@@ -1832,6 +1832,22 @@ class AdmissionApplicationView(APIView):
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def get(self, request):
+        # 1. If an ordinary browser (parent) opens this URL directly without an Authorization header,
+        # redirect them seamlessly to the live frontend form on shreyas.jmstech.co!
+        auth_header = request.headers.get('Authorization') or request.META.get('HTTP_AUTHORIZATION')
+        submission_id = request.query_params.get("submission_id")
+        accept_header = request.headers.get('Accept', '').lower()
+
+        if not auth_header and ('text/html' in accept_header or not accept_header):
+            import os
+            from django.shortcuts import redirect
+            frontend_base = (os.getenv("FRONTEND_BASE_URL") or "https://shreyas.jmstech.co").rstrip('/')
+            target_url = f"{frontend_base}/admission-form/"
+            if submission_id:
+                target_url = f"{target_url}?submission_id={submission_id}"
+            logger.info(f"[BROWSER REDIRECT] Redirecting parent to frontend: {target_url}")
+            return redirect(target_url)
+
         denied = enforce_admin_token(request)
         if denied:
             return denied
@@ -3305,4 +3321,63 @@ class AdminAcademicYearRollView(APIView):
             },
             "ready_for_next_year": True
         }, status=status.HTTP_200_OK)
+
+
+# ==============================================================================
+# WhatsApp Cloud API & CRM SaaS 2-Way Webhook
+# ==============================================================================
+
+class WhatsAppWebhookView(APIView):
+    """
+    Two-Way WhatsApp Webhook:
+    1. GET: Handshake verification for Meta / WhatsApp SaaS (hub.challenge)
+    2. POST: Receives real-time message updates, delivery statuses, and incoming chats.
+             If a forward CRM URL is configured (or in request), it mirrors the payload
+             directly into your SaaS CRM.
+    Endpoint: /api/whatsapp/webhook/
+    """
+    authentication_classes = []
+    permission_classes = []
+
+    def get(self, request):
+        import os
+        mode = request.query_params.get("hub.mode")
+        token = request.query_params.get("hub.verify_token")
+        challenge = request.query_params.get("hub.challenge")
+
+        expected_token = os.getenv("WHATSAPP_WEBHOOK_VERIFY_TOKEN", "shreyas_webhook_token_2026")
+
+        if mode == "subscribe" and token == expected_token:
+            logger.info(f"[WHATSAPP WEBHOOK] Subscription verified successfully with token: {token}")
+            from django.http import HttpResponse
+            return HttpResponse(challenge, content_type="text/plain", status=200)
+
+        logger.warning(f"[WHATSAPP WEBHOOK] Verification failed. Mode: {mode}, Token: {token}")
+        return Response({"error": "Verification token mismatch"}, status=status.HTTP_403_FORBIDDEN)
+
+    def post(self, request):
+        import os
+        payload = request.data
+        logger.info(f"[WHATSAPP WEBHOOK RECEIVED] Payload: {json.dumps(payload)[:500]}")
+
+        # Optional: Forward to external WhatsApp SaaS CRM if configured
+        crm_forward_url = os.getenv("WHATSAPP_CRM_FORWARD_URL", "").strip()
+        if crm_forward_url:
+            try:
+                import threading
+                import requests
+                def _forward(url, data, headers):
+                    try:
+                        requests.post(url, json=data, headers=headers, timeout=10)
+                        logger.info(f"[WHATSAPP FORWARD] Successfully forwarded webhook to {url}")
+                    except Exception as fe:
+                        logger.warning(f"[WHATSAPP FORWARD FAILED] Could not forward to {url}: {fe}")
+
+                forward_headers = {"Content-Type": "application/json"}
+                threading.Thread(target=_forward, args=(crm_forward_url, payload, forward_headers), daemon=True).start()
+            except Exception as e:
+                logger.error(f"[WHATSAPP WEBHOOK FORWARD ERROR] {e}")
+
+        # Return 200 OK immediately as required by Meta / WhatsApp SaaS
+        return Response({"status": "received", "success": True}, status=status.HTTP_200_OK)
 
