@@ -59,9 +59,9 @@ def send_whatsapp_message(phone_number: str, message: str, gateway: str = "mock"
     }
 
 
-def send_whatsapp_template_message(recipient_number: str, submission_id: int, template_name: str = "shreyas_admission_"):
+def send_whatsapp_template_message(recipient_number: str, submission_id: int, template_name: str = "shreyas_admission__"):
     """
-    Sends WhatsApp message using Meta Approved Template ('shreyas_admission_' or 'shreyas_admission_reminder_')
+    Sends WhatsApp message using Meta Approved Template ('shreyas_admission__' or 'shreyas_admission_reminder_')
     with Dynamic Button URL containing submission_id.
     """
     clean_phone = normalize_phone_number(recipient_number)
@@ -232,8 +232,8 @@ def send_payment_received_whatsapp_notifications(recipient_number: str, submissi
     except Exception:
         pass
 
-    # 2. Admission Form Link Message (shreyas_admission_) - SENT SECOND
-    link_result = send_whatsapp_template_message(clean_phone, submission_id, template_name="shreyas_admission_")
+    # 2. Admission Form Link Message (shreyas_admission__) - SENT SECOND
+    link_result = send_whatsapp_template_message(clean_phone, submission_id, template_name="shreyas_admission__")
 
     return {
         "booklet_sent": booklet_result.get("success", False),
