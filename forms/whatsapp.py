@@ -122,9 +122,9 @@ def send_whatsapp_message(phone_number: str, message: str, gateway: str = "mock"
     }
 
 
-def send_whatsapp_template_message(recipient_number: str, submission_id: int, template_name: str = "shreyas_admission__"):
+def send_whatsapp_template_message(recipient_number: str, submission_id: int, template_name: str = "shreyas_admission_link"):
     """
-    Sends WhatsApp message using Meta Approved Template ('shreyas_admission__' or 'shreyas_admission_reminder_')
+    Sends WhatsApp message using Meta Approved Template ('shreyas_admission_link' or 'shreyas_admission_reminder_')
     with Dynamic Button URL containing submission_id.
     Sends directly to Meta first, then logs in CRM SaaS (no duplicate!).
     """
@@ -326,8 +326,8 @@ def send_payment_received_whatsapp_notifications(recipient_number: str, submissi
     except Exception:
         pass
 
-    # 2. Admission Form Link Message (shreyas_admission__) - SENT SECOND
-    link_result = send_whatsapp_template_message(clean_phone, submission_id, template_name="shreyas_admission__")
+    # 2. Admission Form Link Message (shreyas_admission_link) - SENT SECOND
+    link_result = send_whatsapp_template_message(clean_phone, submission_id, template_name="shreyas_admission_link")
 
     return {
         "booklet_sent": booklet_result.get("success", False),
