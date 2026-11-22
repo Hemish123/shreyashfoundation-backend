@@ -40,7 +40,10 @@ from .whatsapp import (
     send_whatsapp_template_message,
     send_whatsapp_booklet_template,
     send_payment_received_whatsapp_notifications,
-    normalize_phone_number
+    normalize_phone_number,
+    WHATSAPP_CRM_WEBHOOK_URL,
+    WHATSAPP_STATUS_TRACKER,
+    record_whatsapp_message_status
 )
 
 logger = logging.getLogger(__name__)
@@ -823,7 +826,7 @@ class AdminExportDataView(APIView):
 
         else:  # Default: all enquiries
             filename_prefix = "Enquiries"
-            qs = QuizSubmission.objects.select_related('created_by').order_by("-created_at")
+            qs = QuizSubmission.objects.select_related('created_by', 'admission_application').order_by("-created_at")
 
             if role != 'ADMIN' and logged_in_admin:
                 qs = qs.filter(created_by=logged_in_admin)
@@ -1173,7 +1176,7 @@ class SubmitQuizView(APIView):
         all_submitted_forms = stats['all_submitted_forms'] or 0
         all_pending_forms = stats['all_pending_forms'] or 0
 
-        queryset = base_queryset.select_related('created_by').order_by("-created_at")
+        queryset = base_queryset.select_related('created_by', 'admission_application').order_by("-created_at")
 
         vibhag = request.query_params.get("vibhag")
         if vibhag:
@@ -1276,9 +1279,35 @@ class SubmitQuizView(APIView):
 
         total_pages = (filtered_count + page_size - 1) // page_size if filtered_count > 0 else 1
         offset = (page - 1) * page_size
-        paged_queryset = queryset[offset:offset + page_size]
+        paged_list = list(queryset[offset:offset + page_size])
 
-        serializer = QuizSubmissionListSerializer(paged_queryset, many=True)
+        # Precompute repeated enquiry flags in 1 batch query to prevent N+1 queries (100 queries per page -> 1 query)
+        if paged_list:
+            phones_10 = set()
+            for obj in paged_list:
+                clean_p = "".join(filter(str.isdigit, str(obj.whatsapp_number)))
+                if clean_p:
+                    phones_10.add(clean_p[-10:] if len(clean_p) >= 10 else clean_p)
+            if phones_10:
+                phone_q = Q()
+                for p10 in phones_10:
+                    phone_q |= Q(whatsapp_number__endswith=p10)
+                matching_rows = QuizSubmission.objects.filter(phone_q).values_list('id', 'whatsapp_number', 'child_name')
+                pair_ids = {}
+                for r_id, r_phone, r_child in matching_rows:
+                    cp = "".join(filter(str.isdigit, str(r_phone)))
+                    p10 = cp[-10:] if len(cp) >= 10 else cp
+                    key = (p10, (r_child or "").strip().lower())
+                    pair_ids.setdefault(key, []).append(r_id)
+                for obj in paged_list:
+                    cp = "".join(filter(str.isdigit, str(obj.whatsapp_number)))
+                    p10 = cp[-10:] if len(cp) >= 10 else cp
+                    key = (p10, (obj.child_name or "").strip().lower())
+                    ids_for_pair = pair_ids.get(key, [])
+                    obj._is_repeated_enquiry = any(i < obj.id for i in ids_for_pair)
+                    obj._repeated_badge = "Repeated Enquiry" if len(ids_for_pair) > 1 else None
+
+        serializer = QuizSubmissionListSerializer(paged_list, many=True)
 
         return Response({
             "status": "success",
@@ -1920,18 +1949,6 @@ class AdmissionFormAutoSaveDraftView(APIView):
                 "message": "An unexpected server error occurred while auto-saving the draft. Please try again."
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-        submission.save(update_fields=updated_fields)
-        logger.info(f"[AUTOSAVE] Submission {submission_id} progress autosaved at {submission.last_draft_saved_at}")
-
-        return Response({
-            "status": "success",
-            "message": "Draft auto-saved successfully.",
-            "submission_id": submission.id,
-            "last_draft_saved_at": submission.last_draft_saved_at,
-            "quiz_draft_saved": bool(quiz_draft is not None),
-            "form_draft_saved": bool(form_draft is not None)
-        }, status=status.HTTP_200_OK)
-
 
 class AdmissionApplicationView(APIView):
     """
@@ -1989,7 +2006,7 @@ class AdmissionApplicationView(APIView):
             serializer = AdmissionApplicationSerializer(application)
             return Response({"status": "success", "data": serializer.data}, status=status.HTTP_200_OK)
 
-        applications = AdmissionApplication.objects.all().order_by("-created_at")
+        applications = AdmissionApplication.objects.select_related('submission', 'submission__created_by').order_by("-created_at")
 
         # Role-based scoping for Submitted Applications:
         # ADMIN sees all applications.
@@ -2061,13 +2078,18 @@ class AdmissionApplicationView(APIView):
                 app_search_filter |= Q(submission_id=int(search_query))
             applications = applications.filter(app_search_filter)
 
-        # Summary Counts (for UI badges: All, Pass, Fail)
+        # Summary Counts (for UI badges: All, Pass, Fail) - Single SQL aggregation query
         base_qs = AdmissionApplication.objects.all()
         if role != 'ADMIN' and logged_in_admin:
             base_qs = base_qs.filter(submission__created_by=logged_in_admin)
-        all_count = base_qs.count()
-        pass_count = base_qs.filter(submission__qa_status="PASSED").count()
-        fail_count = base_qs.filter(submission__qa_status="FAILED").count()
+        app_counts = base_qs.aggregate(
+            all_count=Count('id'),
+            pass_count=Count(Case(When(submission__qa_status="PASSED", then=1), output_field=IntegerField())),
+            fail_count=Count(Case(When(submission__qa_status="FAILED", then=1), output_field=IntegerField()))
+        )
+        all_count = app_counts['all_count'] or 0
+        pass_count = app_counts['pass_count'] or 0
+        fail_count = app_counts['fail_count'] or 0
 
         # Pagination support (defaults to page 1, 50 records per page)
         total_count = applications.count()
@@ -2673,7 +2695,7 @@ class AdminMeritBoardView(APIView):
                     "medium": medium,
                     "cutoff_seats": cutoff_seats
                 }
-            ranked_apps = AdmissionApplication.objects.filter(
+            ranked_apps = AdmissionApplication.objects.select_related('submission').filter(
                 standard__iexact=standard,
                 medium__iexact=medium
             ).exclude(admission_status__in=['CANCELLED', 'REJECTED']).order_by('merit_rank', '-final_aggregate_score')
@@ -2688,22 +2710,22 @@ class AdminMeritBoardView(APIView):
                         s = recompute_merit_rank_and_cutoff(standard=std_val, medium=med_val, cutoff_seats=cutoff_seats)
                         summaries.append(s)
             
-            ranked_apps = AdmissionApplication.objects.exclude(
+            ranked_apps = AdmissionApplication.objects.select_related('submission').exclude(
                 admission_status__in=['CANCELLED', 'REJECTED']
             ).order_by('-final_aggregate_score', 'merit_rank', 'created_at')
 
-            # Populate cross-cutting merit ranks if viewing All Standards
-            assigned_rank = 1
-            for app_obj in ranked_apps:
-                app_obj.merit_rank = assigned_rank
-                assigned_rank += 1
+            summary_counts = ranked_apps.aggregate(
+                total_ranked=Count('id'),
+                selected_seats=Count(Case(When(admission_status='SELECTED', then=1), output_field=IntegerField())),
+                waitlisted=Count(Case(When(admission_status='WAITLISTED', then=1), output_field=IntegerField()))
+            )
 
             summary = {
                 "standard": standard or "All Standards",
                 "medium": medium or "All Mediums",
-                "total_ranked": ranked_apps.count(),
-                "selected_seats": ranked_apps.filter(admission_status='SELECTED').count(),
-                "waitlisted": ranked_apps.filter(admission_status='WAITLISTED').count(),
+                "total_ranked": summary_counts['total_ranked'] or 0,
+                "selected_seats": summary_counts['selected_seats'] or 0,
+                "waitlisted": summary_counts['waitlisted'] or 0,
                 "cutoff_seats": cutoff_seats
             }
 
@@ -2718,7 +2740,10 @@ class AdminMeritBoardView(APIView):
 
         total_pages = (total_applicants + page_size - 1) // page_size if total_applicants > 0 else 1
         offset = (page - 1) * page_size
-        paged_ranked_apps = ranked_apps[offset:offset + page_size]
+        paged_ranked_apps = list(ranked_apps[offset:offset + page_size])
+        if not (standard and medium and not standard.lower().startswith("all") and not medium.lower().startswith("all")):
+            for idx, app_obj in enumerate(paged_ranked_apps, start=offset + 1):
+                app_obj.merit_rank = idx
 
         serializer = MeritRankBoardSerializer(paged_ranked_apps, many=True)
 
@@ -3362,11 +3387,10 @@ class AdminPrintPhysicalFormView(APIView):
             return denied
 
         if application_id:
-            from django.db.models import Q
             if str(application_id).isdigit():
-                applications = AdmissionApplication.objects.filter(Q(id=int(application_id)) | Q(application_number=str(application_id)))
+                applications = AdmissionApplication.objects.select_related('evaluator').filter(Q(id=int(application_id)) | Q(application_number=str(application_id)))
             else:
-                applications = AdmissionApplication.objects.filter(application_number=str(application_id))
+                applications = AdmissionApplication.objects.select_related('evaluator').filter(application_number=str(application_id))
 
             if not applications.exists():
                 return Response({
@@ -3378,7 +3402,7 @@ class AdminPrintPhysicalFormView(APIView):
             medium = request.query_params.get("medium")
             app_status = request.query_params.get("status", "SELECTED")
 
-            applications = AdmissionApplication.objects.all()
+            applications = AdmissionApplication.objects.select_related('evaluator').all()
             if standard:
                 applications = applications.filter(standard__iexact=standard)
             if medium:
@@ -3539,42 +3563,180 @@ class AdminAcademicYearRollView(APIView):
 class WhatsAppWebhookView(APIView):
     """
     Two-Way WhatsApp Webhook:
-    1. GET: Handshake verification for Meta / WhatsApp SaaS (hub.challenge)
-    2. POST: Receives real-time message updates, delivery statuses, and incoming chats.
-             If a forward CRM URL is configured (or in request), it mirrors the payload
-             directly into your SaaS CRM.
+    1. GET: Handshake verification for Meta / WhatsApp SaaS (hub.challenge),
+            OR live status inspection when called without hub.mode (e.g. GET /api/whatsapp/webhook/?phone=917874566064 or ?message_id=wamid...)
+    2. POST: Receives real-time message updates, delivery statuses (sent, delivered, read, failed), and incoming chats.
+             Returns parsed status details directly in the response JSON.
     Endpoint: /api/whatsapp/webhook/
     """
     authentication_classes = []
     permission_classes = []
 
     def get(self, request):
-        import os
         mode = request.query_params.get("hub.mode")
         token = request.query_params.get("hub.verify_token")
         challenge = request.query_params.get("hub.challenge")
 
-        expected_token = os.getenv("WHATSAPP_WEBHOOK_VERIFY_TOKEN", "shreyas_webhook_token_2026")
+        # 1. Meta / SaaS Webhook Verification Handshake
+        if mode:
+            expected_token = os.getenv("WHATSAPP_WEBHOOK_VERIFY_TOKEN", "shreyas_webhook_token_2026")
+            if mode == "subscribe" and token == expected_token:
+                logger.info(f"[WHATSAPP WEBHOOK] Subscription verified successfully with token: {token}")
+                from django.http import HttpResponse
+                return HttpResponse(challenge, content_type="text/plain", status=200)
 
-        if mode == "subscribe" and token == expected_token:
-            logger.info(f"[WHATSAPP WEBHOOK] Subscription verified successfully with token: {token}")
-            from django.http import HttpResponse
-            return HttpResponse(challenge, content_type="text/plain", status=200)
+            logger.warning(f"[WHATSAPP WEBHOOK] Verification failed. Mode: {mode}, Token: {token}")
+            return Response({"error": "Verification token mismatch"}, status=status.HTTP_403_FORBIDDEN)
 
-        logger.warning(f"[WHATSAPP WEBHOOK] Verification failed. Mode: {mode}, Token: {token}")
-        return Response({"error": "Verification token mismatch"}, status=status.HTTP_403_FORBIDDEN)
+        # 2. Status Inspection Mode (GET /api/whatsapp/webhook/?message_id=... or ?phone=... or ?submission_id=...)
+        q_msg_id = (request.query_params.get("message_id") or "").strip()
+        q_phone = normalize_phone_number(request.query_params.get("phone") or "")
+        q_sub_id = (request.query_params.get("submission_id") or "").strip()
+
+        all_tracked = list(WHATSAPP_STATUS_TRACKER.values())
+        if q_msg_id:
+            all_tracked = [m for m in all_tracked if m.get("message_id") == q_msg_id]
+        if q_phone:
+            all_tracked = [m for m in all_tracked if q_phone in str(m.get("recipient", ""))]
+        if q_sub_id and q_sub_id.isdigit():
+            all_tracked = [m for m in all_tracked if str(m.get("submission_id")) == q_sub_id]
+
+        # Sort newest first
+        all_tracked.reverse()
+
+        summary = {
+            "sent": sum(1 for m in all_tracked if m.get("current_status") == "sent"),
+            "delivered": sum(1 for m in all_tracked if m.get("current_status") == "delivered"),
+            "read": sum(1 for m in all_tracked if m.get("current_status") == "read"),
+            "failed": sum(1 for m in all_tracked if m.get("current_status") == "failed"),
+        }
+
+        return Response({
+            "status": "success",
+            "total_tracked_messages": len(all_tracked),
+            "status_summary": summary,
+            "messages": all_tracked
+        }, status=status.HTTP_200_OK)
 
     def post(self, request):
-        import os
         payload = request.data
         logger.info(f"[WHATSAPP WEBHOOK RECEIVED] Payload: {json.dumps(payload)[:500]}")
 
-        # Optional: Forward to external WhatsApp SaaS CRM if configured
-        crm_forward_url = os.getenv("WHATSAPP_CRM_FORWARD_URL", "").strip()
-        if crm_forward_url:
+        parsed_statuses = []
+        parsed_messages = []
+
+        if isinstance(payload, dict):
+            # Case A: Flat status callback payload (e.g. forwarded from SaaS CRM)
+            if payload.get("message_id") and payload.get("status"):
+                m_id = str(payload.get("message_id"))
+                st_val = str(payload.get("status")).lower()
+                recip = normalize_phone_number(payload.get("recipient_id") or payload.get("phone") or "")
+                ts = str(payload.get("timestamp") or "")
+                errs = payload.get("errors") or []
+                record_whatsapp_message_status(
+                    message_id=m_id,
+                    status_val=st_val,
+                    recipient=recip,
+                    timestamp=ts,
+                    errors=errs
+                )
+                parsed_statuses.append({
+                    "message_id": m_id,
+                    "delivery_status": st_val,  # sent | delivered | read | failed
+                    "recipient_id": recip,
+                    "timestamp": ts,
+                    "errors": errs
+                })
+
+            # Case B: Standard Meta entry -> changes -> value -> statuses / messages
+            for entry in payload.get("entry", []):
+                if not isinstance(entry, dict):
+                    continue
+                for change in entry.get("changes", []):
+                    if not isinstance(change, dict):
+                        continue
+                    val = change.get("value", {})
+                    if not isinstance(val, dict):
+                        continue
+
+                    for st in val.get("statuses", []):
+                        if not isinstance(st, dict):
+                            continue
+                        m_id = str(st.get("id") or st.get("message_id") or "")
+                        st_val = str(st.get("status") or "").lower()
+                        recip = normalize_phone_number(st.get("recipient_id") or "")
+                        ts = str(st.get("timestamp") or "")
+                        errs = st.get("errors") or []
+                        if m_id and st_val:
+                            record_whatsapp_message_status(
+                                message_id=m_id,
+                                status_val=st_val,
+                                recipient=recip,
+                                timestamp=ts,
+                                errors=errs
+                            )
+                            # Avoid duplicate entry if both flat and nested were in same payload
+                            if not any(ps["message_id"] == m_id and ps["delivery_status"] == st_val for ps in parsed_statuses):
+                                parsed_statuses.append({
+                                    "message_id": m_id,
+                                    "delivery_status": st_val,  # sent | delivered | read | failed
+                                    "recipient_id": recip,
+                                    "timestamp": ts,
+                                    "errors": errs
+                                })
+
+                    for msg in val.get("messages", []):
+                        if not isinstance(msg, dict):
+                            continue
+                        # If it's a LOG_TEMPLATE / TRIGGER_TEMPLATE event
+                        if msg.get("event") in ["LOG_TEMPLATE", "TRIGGER_TEMPLATE"]:
+                            m_id = str(msg.get("message_id") or "")
+                            recip = normalize_phone_number(msg.get("phone") or "")
+                            tpl_name = str(msg.get("template_name") or "")
+                            sub_id = msg.get("submission_id")
+                            if m_id:
+                                record_whatsapp_message_status(
+                                    message_id=m_id,
+                                    status_val="sent",
+                                    recipient=recip,
+                                    template_name=tpl_name,
+                                    submission_id=sub_id
+                                )
+                            parsed_messages.append({
+                                "event": msg.get("event"),
+                                "message_id": m_id,
+                                "delivery_status": "sent",
+                                "recipient": recip,
+                                "template_name": tpl_name,
+                                "submission_id": sub_id
+                            })
+                        else:
+                            m_id = str(msg.get("id") or "")
+                            sender = normalize_phone_number(msg.get("from") or "")
+                            m_type = str(msg.get("type") or "text")
+                            text_body = (msg.get("text") or {}).get("body", "") if isinstance(msg.get("text"), dict) else ""
+                            parsed_messages.append({
+                                "message_id": m_id,
+                                "from": sender,
+                                "type": m_type,
+                                "text": text_body,
+                                "direction": "inbound"
+                            })
+
+        # Avoid bounce-back loop if payload was already forwarded from WhatsApp SaaS CRM
+        is_from_saas_crm = bool(
+            request.headers.get("X-Forwarded-From-SaaS-CRM")
+            or request.META.get("HTTP_X_FORWARDED_FROM_SAAS_CRM")
+            or (isinstance(payload, dict) and (
+                payload.get("forwarded_from_saas_crm")
+                or payload.get("forwarded_from_shreyas")
+                or payload.get("via_crm")
+            ))
+        )
+
+        # Forward to external WhatsApp SaaS CRM only if not already originating from SaaS CRM
+        if WHATSAPP_CRM_WEBHOOK_URL and not is_from_saas_crm:
             try:
-                import threading
-                import requests
                 def _forward(url, data, headers):
                     try:
                         requests.post(url, json=data, headers=headers, timeout=10)
@@ -3582,11 +3744,20 @@ class WhatsAppWebhookView(APIView):
                     except Exception as fe:
                         logger.warning(f"[WHATSAPP FORWARD FAILED] Could not forward to {url}: {fe}")
 
-                forward_headers = {"Content-Type": "application/json"}
-                threading.Thread(target=_forward, args=(crm_forward_url, payload, forward_headers), daemon=True).start()
+                forward_headers = {"Content-Type": "application/json", "X-Forwarded-From-Shreyas": "1"}
+                threading.Thread(target=_forward, args=(WHATSAPP_CRM_WEBHOOK_URL, payload, forward_headers), daemon=True).start()
             except Exception as e:
                 logger.error(f"[WHATSAPP WEBHOOK FORWARD ERROR] {e}")
 
-        # Return 200 OK immediately as required by Meta / WhatsApp SaaS
-        return Response({"status": "received", "success": True}, status=status.HTTP_200_OK)
+        # Return rich JSON response showing exact Meta status (sent, delivered, read, failed)
+        primary_status = parsed_statuses[0]["delivery_status"] if parsed_statuses else (
+            parsed_messages[0].get("delivery_status", "sent") if parsed_messages else "sent"
+        )
+        return Response({
+            "status": primary_status,
+            "delivery_status": primary_status,
+            "success": True,
+            "statuses": parsed_statuses,
+            "messages": parsed_messages
+        }, status=status.HTTP_200_OK)
 

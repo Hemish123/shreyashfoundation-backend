@@ -9,5 +9,6 @@ class FormsConfig(AppConfig):
         try:
             from .reminder_worker import start_reminder_scheduler
             start_reminder_scheduler()
-        except Exception:
-            pass
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Failed to start reminder scheduler: {e}")

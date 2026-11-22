@@ -15,8 +15,8 @@ class AuditLogMiddleware(MiddlewareMixin):
         if not request.path.startswith('/api/'):
             return response
 
-        # Do not recursively log GET calls to the audit log itself
-        if request.path == '/api/admin/audit-logs/' and request.method == 'GET':
+        # Do not recursively log GET calls to the audit log itself or high-frequency autosave/webhook pings
+        if (request.path == '/api/admin/audit-logs/' and request.method == 'GET') or request.path in ['/api/whatsapp/webhook/', '/api/admission-form/autosave/']:
             return response
 
         # Extract client IP

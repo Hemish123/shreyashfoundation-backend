@@ -75,25 +75,31 @@ class QuizSubmissionListSerializer(serializers.ModelSerializer):
         return None
 
     def get_is_repeated_enquiry(self, obj):
+        if hasattr(obj, '_is_repeated_enquiry'):
+            return obj._is_repeated_enquiry
         clean = "".join(filter(str.isdigit, str(obj.whatsapp_number)))
         phone_10 = clean[-10:] if len(clean) >= 10 else clean
-        # Check if there is another older enquiry with the same child name and phone number
-        older_exists = QuizSubmission.objects.filter(
+        if not phone_10:
+            return False
+        return QuizSubmission.objects.filter(
             whatsapp_number__endswith=phone_10,
             child_name__iexact=obj.child_name.strip(),
             id__lt=obj.id
         ).exists()
-        return older_exists
 
     def get_repeated_badge(self, obj):
+        if hasattr(obj, '_repeated_badge'):
+            return obj._repeated_badge
         clean = "".join(filter(str.isdigit, str(obj.whatsapp_number)))
         phone_10 = clean[-10:] if len(clean) >= 10 else clean
+        if not phone_10:
+            return None
         count = QuizSubmission.objects.filter(
             whatsapp_number__endswith=phone_10,
             child_name__iexact=obj.child_name.strip()
         ).count()
         if count > 1:
-            return "Repeated Enquiry"  #  "Re-enquiry"
+            return "Repeated Enquiry"
         return None
 
 
@@ -502,11 +508,17 @@ class AdmissionApplicationSerializer(serializers.ModelSerializer):
                 if not attrs.get('previous_report_card'):
                     field_errors['previous_report_card'] = "Previous year's report card / marksheet is compulsory for admission in Std 2 and above."
 
-            # Mandatory: Birth certificate & Parent/Guardian Aadhar
+            # Mandatory: Child Passport Photo, Birth Certificate, Child Aadhar Card, Parent/Guardian Aadhar Card
+            if not attrs.get('photograph_child'):
+                field_errors['photograph_child'] = "Child's passport size photograph is compulsory and must be uploaded."
+
             if not attrs.get('birth_certificate'):
                 field_errors['birth_certificate'] = "Birth Certificate is compulsory and must be uploaded."
 
-            if not (attrs.get('parent_aadhar_card') or attrs.get('child_aadhar_card')):
+            if not attrs.get('child_aadhar_card'):
+                field_errors['child_aadhar_card'] = "Child's Aadhar Card is compulsory and must be uploaded."
+
+            if not attrs.get('parent_aadhar_card'):
                 field_errors['parent_aadhar_card'] = "Parent's or Guardian's Aadhar Card is compulsory and must be uploaded."
 
             # Signature validation (At least one parent/guardian must sign)

@@ -176,23 +176,31 @@ def recompute_merit_rank_and_cutoff(standard: str, medium: str, cutoff_seats: in
     rank = 1
     selected_count = 0
     waitlisted_count = 0
+    to_update = []
 
     for app in qs:
-        app.merit_rank = rank
+        new_rank = rank
+        new_status = app.admission_status
         if rank <= cutoff_seats and (app.total_part_y_score > 0 or app.final_aggregate_score > 0):
-            app.admission_status = 'SELECTED'
+            new_status = 'SELECTED'
             selected_count += 1
         elif rank > cutoff_seats:
-            app.admission_status = 'WAITLISTED'
+            new_status = 'WAITLISTED'
             waitlisted_count += 1
 
-        app.save(update_fields=['merit_rank', 'admission_status'])
+        if app.merit_rank != new_rank or app.admission_status != new_status:
+            app.merit_rank = new_rank
+            app.admission_status = new_status
+            to_update.append(app)
         rank += 1
+
+    if to_update:
+        AdmissionApplication.objects.bulk_update(to_update, ['merit_rank', 'admission_status'])
 
     return {
         "standard": standard,
         "medium": medium,
-        "total_ranked": qs.count(),
+        "total_ranked": rank - 1,
         "selected_seats": selected_count,
         "waitlisted": waitlisted_count,
         "cutoff_seats": cutoff_seats

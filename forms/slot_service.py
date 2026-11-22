@@ -42,6 +42,16 @@ def allocate_next_available_interaction_slot(reference_date=None, allow_admin_bu
     """
     current_date = reference_date or INTERACTION_START_DATE
 
+    # Fetch all booked slot counts in a single DB query instead of 44 separate queries
+    from django.db.models import Count
+    slot_rows = AdmissionApplication.objects.filter(
+        interaction_date__gte=current_date,
+        interaction_date__lte=(INTERACTION_END_DATE or date(2026, 12, 31))
+    ).exclude(
+        admission_status__in=['CANCELLED', 'REJECTED']
+    ).values('interaction_date', 'interaction_slot_no').annotate(total=Count('id'))
+    booked_map = {(r['interaction_date'], r['interaction_slot_no']): r['total'] for r in slot_rows}
+
     # Search through the interaction window (Nov 26 to Dec 8)
     while current_date <= (INTERACTION_END_DATE or date(2026, 12, 31)):
         # Skip Sundays
@@ -54,11 +64,7 @@ def allocate_next_available_interaction_slot(reference_date=None, allow_admin_bu
             slot_time = slot_def["time"]
             capacity = slot_def["max_capacity"] if allow_admin_buffer else slot_def["capacity"]
 
-            # Count existing applications already booked for this date and slot
-            booked_count = AdmissionApplication.objects.filter(
-                interaction_date=current_date,
-                interaction_slot_no=slot_no
-            ).exclude(admission_status__in=['CANCELLED', 'REJECTED']).count()
+            booked_count = booked_map.get((current_date, slot_no), 0)
 
             if booked_count < capacity:
                 logger.info(

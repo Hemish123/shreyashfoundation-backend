@@ -7,15 +7,51 @@ from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
+# Single WhatsApp CRM SaaS Webhook URL (used directly in code, no .env dependency needed)
+WHATSAPP_CRM_WEBHOOK_URL = "https://whatsappcrmsaas-emdke9dnb4f8bne6.centralindia-01.azurewebsites.net/api/webhook/whatsapp/"
+
+# In-memory store for recent WhatsApp message statuses & events (for quick debugging/inspection via API)
+WHATSAPP_STATUS_TRACKER = {}
+
+
+def record_whatsapp_message_status(
+    message_id: str,
+    status_val: str,
+    recipient: str = "",
+    template_name: str = "",
+    submission_id: int = None,
+    timestamp: str = "",
+    errors: list = None
+):
+    if not message_id:
+        return
+    from django.utils import timezone
+    existing = WHATSAPP_STATUS_TRACKER.get(message_id, {})
+    history = existing.get("status_history", [])
+    if not history or history[-1].get("status") != status_val:
+        history.append({
+            "status": status_val,
+            "updated_at": timezone.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "timestamp": timestamp or ""
+        })
+    WHATSAPP_STATUS_TRACKER[message_id] = {
+        "message_id": message_id,
+        "current_status": status_val,  # sent | delivered | read | failed
+        "recipient": recipient or existing.get("recipient", ""),
+        "template_name": template_name or existing.get("template_name", ""),
+        "submission_id": submission_id if submission_id is not None else existing.get("submission_id"),
+        "errors": errors or existing.get("errors", []),
+        "status_history": history,
+        "last_updated": timezone.now().strftime("%Y-%m-%d %H:%M:%S")
+    }
+
 
 def trigger_saas_crm_template(phone: str, template_name: str, parameters: dict = None, language: str = "en", submission_id: int = None, message_id: str = None) -> dict:
     """
     Notifies external WhatsApp CRM SaaS webhook to log/display the template.
     If message_id is provided, CRM enters 'LOG_TEMPLATE' mode (no duplicate dispatch to Meta).
     """
-    crm_url = os.getenv("WHATSAPP_CRM_TRIGGER_URL", "").strip()
-    if not crm_url:
-        return {"success": False, "error": "WHATSAPP_CRM_TRIGGER_URL not configured"}
+    crm_url = WHATSAPP_CRM_WEBHOOK_URL
 
     clean_phone = normalize_phone_number(phone)
     phone_number_id = getattr(settings, 'WHATSAPP_PHONE_NUMBER_ID', '1481244255068012')
@@ -54,20 +90,21 @@ def trigger_saas_crm_template(phone: str, template_name: str, parameters: dict =
     }
 
     try:
-        logger.info(f"[SAAS CRM LOG] Logging template '{template_name}' (MsgID: {message_id}) for {clean_phone} via CRM")
-        res = requests.post(crm_url, json=payload, headers={"Content-Type": "application/json"}, timeout=10)
-        logger.info(f"[SAAS CRM LOG] Response code: {res.status_code}")
-        if res.status_code in [200, 201, 202]:
+        import threading
+        def _send_to_crm():
             try:
-                res_json = res.json()
-            except Exception:
-                res_json = {"raw": res.text}
-            return {"success": True, "via_crm": True, "data": res_json, "recipient": clean_phone}
-        else:
-            logger.warning(f"[SAAS CRM LOG] CRM responded with code {res.status_code}: {res.text[:200]}")
-            return {"success": False, "error": f"CRM responded with status {res.status_code}"}
+                logger.info(f"[SAAS CRM LOG] Logging template '{template_name}' (MsgID: {message_id}) for {clean_phone} via CRM")
+                res = requests.post(crm_url, json=payload, headers={"Content-Type": "application/json"}, timeout=8)
+                logger.info(f"[SAAS CRM LOG] Response code: {res.status_code}")
+                if res.status_code not in [200, 201, 202]:
+                    logger.warning(f"[SAAS CRM LOG] CRM responded with code {res.status_code}: {res.text[:200]}")
+            except Exception as err:
+                logger.error(f"[SAAS CRM LOG] Exception: {err}")
+
+        threading.Thread(target=_send_to_crm, daemon=True).start()
+        return {"success": True, "via_crm": True, "queued": True, "recipient": clean_phone}
     except Exception as e:
-        logger.error(f"[SAAS CRM LOG] Exception: {e}")
+        logger.error(f"[SAAS CRM LOG] Thread dispatch exception: {e}")
         return {"success": False, "error": str(e)}
 
 
@@ -107,19 +144,6 @@ def generate_whatsapp_link(phone_number: str, message: str) -> str:
     clean_phone = normalize_phone_number(phone_number)
     encoded_message = urllib.parse.quote(message)
     return f"https://api.whatsapp.com/send?phone={clean_phone}&text={encoded_message}"
-
-
-def send_whatsapp_message(phone_number: str, message: str, gateway: str = "mock"):
-    """
-    Helper to send plain WhatsApp text message via an API gateway / webhook.
-    """
-    clean_phone = normalize_phone_number(phone_number)
-    logger.info(f"Sending WhatsApp message to {clean_phone}: {message}")
-    return {
-        "sent": True,
-        "recipient": clean_phone,
-        "mode": gateway
-    }
 
 
 def send_whatsapp_template_message(recipient_number: str, submission_id: int, template_name: str = "shreyas_admission_link"):
@@ -183,6 +207,15 @@ def send_whatsapp_template_message(recipient_number: str, submission_id: int, te
             msg_id = ""
             if isinstance(res_data, dict) and res_data.get("messages"):
                 msg_id = res_data["messages"][0].get("id", "")
+
+            if msg_id:
+                record_whatsapp_message_status(
+                    message_id=msg_id,
+                    status_val="sent",
+                    recipient=clean_phone,
+                    template_name=template_name,
+                    submission_id=submission_id
+                )
 
             # Log into CRM asynchronously so it shows in CRM without duplicate sending
             trigger_saas_crm_template(
@@ -285,6 +318,14 @@ def send_whatsapp_booklet_template(recipient_number: str, language: str = "gu", 
             msg_id = ""
             if isinstance(res_data, dict) and res_data.get("messages"):
                 msg_id = res_data["messages"][0].get("id", "")
+
+            if msg_id:
+                record_whatsapp_message_status(
+                    message_id=msg_id,
+                    status_val="sent",
+                    recipient=clean_phone,
+                    template_name=template_name
+                )
 
             # Log into CRM asynchronously
             trigger_saas_crm_template(
@@ -401,6 +442,14 @@ def send_whatsapp_interaction_scheduled_message(
             msg_id = ""
             if isinstance(res_data, dict) and res_data.get("messages"):
                 msg_id = res_data["messages"][0].get("id", "")
+
+            if msg_id:
+                record_whatsapp_message_status(
+                    message_id=msg_id,
+                    status_val="sent",
+                    recipient=clean_phone,
+                    template_name=template_name
+                )
 
             # Log into CRM asynchronously
             trigger_saas_crm_template(
