@@ -385,32 +385,55 @@
         }
         .full-doc-container {
             width: 100%;
-            height: 235mm;
+            min-height: 225mm;
             border: 1px solid #cbd5e1;
             border-radius: 4px;
-            background: #fafaf9;
+            background: #ffffff;
             display: flex;
+            flex-direction: column;
             align-items: center;
             justify-content: center;
-            padding: 8px;
-            overflow: hidden;
+            padding: 6px;
+            overflow: hidden !important;
         }
         .full-doc-img-wrapper {
             width: 100%;
-            height: 100%;
             display: flex;
             align-items: center;
             justify-content: center;
+            overflow: hidden !important;
         }
         .full-doc-img {
             max-width: 100%;
-            max-height: 228mm;
+            max-height: 225mm;
+            width: auto;
+            height: auto;
             object-fit: contain;
+            display: block;
+            margin: 0 auto;
         }
-        .full-doc-pdf-frame {
+        .pdf-canvas-list {
             width: 100%;
-            height: 228mm;
-            border: none;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            overflow: hidden !important;
+        }
+        .pdf-page-img {
+            max-width: 100%;
+            max-height: 225mm;
+            width: auto;
+            height: auto;
+            object-fit: contain;
+            display: block;
+            margin: 0 auto;
+        }
+        .pdf-loading-msg {
+            font-size: 11px;
+            color: #475569;
+            padding: 20px;
         }
         .annexure-doc-box {
             padding: 24px;
@@ -435,10 +458,11 @@
             }
         }
     </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 </head>
 <body>
     <div class="top-action-bar no-print">
-        <div class="bar-title"><img src="https://shreyasfoundation.blob.core.windows.net/media/shreyas_logo.png?se=2026-11-23T11%3A09%3A46Z&sp=r&sv=2026-10-06&sr=b&sig=ehoL0pbh2TrK7dSt%2BEBbWPvmRBwrioGCW/x/VgoXz9A%3D" alt="Logo" class="top-bar-logo" /> Shreyas Foundation — Official Admission Form &amp; Parental Quiz Result Document</div>
+        <div class="bar-title"><img src="https://shreyasfoundation.blob.core.windows.net/media/shreyas_logo.png?se=2026-11-23T11%3A28%3A24Z&sp=r&sv=2026-10-06&sr=b&sig=oW%2B7twUx%2BZhbtcK9x49mViSup7De4w7vCV8XEZkOIaA%3D" alt="Logo" class="top-bar-logo" /> Shreyas Foundation — Official Admission Form &amp; Parental Quiz Result Document</div>
         <div class="bar-actions">
             <button class="action-btn primary" onclick="window.print()">🖨️ Print / Save as PDF</button>
         </div>
@@ -449,7 +473,7 @@
             <!-- Header Section -->
             <div class="header-container">
                 <div class="logo-area">
-                    <img src="https://shreyasfoundation.blob.core.windows.net/media/shreyas_logo.png?se=2026-11-23T11%3A09%3A46Z&sp=r&sv=2026-10-06&sr=b&sig=ehoL0pbh2TrK7dSt%2BEBbWPvmRBwrioGCW/x/VgoXz9A%3D" alt="Shreyas Foundation Logo" class="school-logo-img" />
+                    <img src="https://shreyasfoundation.blob.core.windows.net/media/shreyas_logo.png?se=2026-11-23T11%3A28%3A24Z&sp=r&sv=2026-10-06&sr=b&sig=oW%2B7twUx%2BZhbtcK9x49mViSup7De4w7vCV8XEZkOIaA%3D" alt="Shreyas Foundation Logo" class="school-logo-img" />
                 </div>
                 <div class="header-text">
                     <h1 class="trust-title">SHREYAS FOUNDATION</h1>
@@ -677,7 +701,7 @@
         <div class="admission-sheet page-break">
             <div class="header-container" style="padding-bottom: 6px; margin-bottom: 6px;">
                 <div class="logo-area">
-                    <img src="https://shreyasfoundation.blob.core.windows.net/media/shreyas_logo.png?se=2026-11-23T11%3A09%3A46Z&sp=r&sv=2026-10-06&sr=b&sig=ehoL0pbh2TrK7dSt%2BEBbWPvmRBwrioGCW/x/VgoXz9A%3D" alt="Shreyas Foundation Logo" class="school-logo-img" />
+                    <img src="https://shreyasfoundation.blob.core.windows.net/media/shreyas_logo.png?se=2026-11-23T11%3A28%3A24Z&sp=r&sv=2026-10-06&sr=b&sig=oW%2B7twUx%2BZhbtcK9x49mViSup7De4w7vCV8XEZkOIaA%3D" alt="Shreyas Foundation Logo" class="school-logo-img" />
                 </div>
                 <div class="header-text">
                     <h1 class="trust-title">SHREYAS FOUNDATION — PARENTAL QUESTIONNAIRE &amp; QUIZ RESULT</h1>
@@ -768,7 +792,7 @@
         <div class="admission-sheet page-break">
             <div class="header-container" style="padding-bottom: 6px; margin-bottom: 8px;">
                 <div class="logo-area">
-                    <img src="https://shreyasfoundation.blob.core.windows.net/media/shreyas_logo.png?se=2026-11-23T11%3A09%3A46Z&sp=r&sv=2026-10-06&sr=b&sig=ehoL0pbh2TrK7dSt%2BEBbWPvmRBwrioGCW/x/VgoXz9A%3D" alt="Shreyas Foundation Logo" class="school-logo-img" />
+                    <img src="https://shreyasfoundation.blob.core.windows.net/media/shreyas_logo.png?se=2026-11-23T11%3A28%3A24Z&sp=r&sv=2026-10-06&sr=b&sig=oW%2B7twUx%2BZhbtcK9x49mViSup7De4w7vCV8XEZkOIaA%3D" alt="Shreyas Foundation Logo" class="school-logo-img" />
                 </div>
                 <div class="header-text">
                     <h1 class="trust-title">SHREYAS FOUNDATION — ATTACHED DOCUMENT (1 OF 5)</h1>
@@ -795,7 +819,7 @@
         <div class="admission-sheet page-break">
             <div class="header-container" style="padding-bottom: 6px; margin-bottom: 8px;">
                 <div class="logo-area">
-                    <img src="https://shreyasfoundation.blob.core.windows.net/media/shreyas_logo.png?se=2026-11-23T11%3A09%3A46Z&sp=r&sv=2026-10-06&sr=b&sig=ehoL0pbh2TrK7dSt%2BEBbWPvmRBwrioGCW/x/VgoXz9A%3D" alt="Shreyas Foundation Logo" class="school-logo-img" />
+                    <img src="https://shreyasfoundation.blob.core.windows.net/media/shreyas_logo.png?se=2026-11-23T11%3A28%3A24Z&sp=r&sv=2026-10-06&sr=b&sig=oW%2B7twUx%2BZhbtcK9x49mViSup7De4w7vCV8XEZkOIaA%3D" alt="Shreyas Foundation Logo" class="school-logo-img" />
                 </div>
                 <div class="header-text">
                     <h1 class="trust-title">SHREYAS FOUNDATION — ATTACHED DOCUMENT (2 OF 5)</h1>
@@ -822,7 +846,7 @@
         <div class="admission-sheet page-break">
             <div class="header-container" style="padding-bottom: 6px; margin-bottom: 8px;">
                 <div class="logo-area">
-                    <img src="https://shreyasfoundation.blob.core.windows.net/media/shreyas_logo.png?se=2026-11-23T11%3A09%3A46Z&sp=r&sv=2026-10-06&sr=b&sig=ehoL0pbh2TrK7dSt%2BEBbWPvmRBwrioGCW/x/VgoXz9A%3D" alt="Shreyas Foundation Logo" class="school-logo-img" />
+                    <img src="https://shreyasfoundation.blob.core.windows.net/media/shreyas_logo.png?se=2026-11-23T11%3A28%3A24Z&sp=r&sv=2026-10-06&sr=b&sig=oW%2B7twUx%2BZhbtcK9x49mViSup7De4w7vCV8XEZkOIaA%3D" alt="Shreyas Foundation Logo" class="school-logo-img" />
                 </div>
                 <div class="header-text">
                     <h1 class="trust-title">SHREYAS FOUNDATION — ATTACHED DOCUMENT (3 OF 5)</h1>
@@ -849,7 +873,7 @@
         <div class="admission-sheet page-break">
             <div class="header-container" style="padding-bottom: 6px; margin-bottom: 8px;">
                 <div class="logo-area">
-                    <img src="https://shreyasfoundation.blob.core.windows.net/media/shreyas_logo.png?se=2026-11-23T11%3A09%3A46Z&sp=r&sv=2026-10-06&sr=b&sig=ehoL0pbh2TrK7dSt%2BEBbWPvmRBwrioGCW/x/VgoXz9A%3D" alt="Shreyas Foundation Logo" class="school-logo-img" />
+                    <img src="https://shreyasfoundation.blob.core.windows.net/media/shreyas_logo.png?se=2026-11-23T11%3A28%3A24Z&sp=r&sv=2026-10-06&sr=b&sig=oW%2B7twUx%2BZhbtcK9x49mViSup7De4w7vCV8XEZkOIaA%3D" alt="Shreyas Foundation Logo" class="school-logo-img" />
                 </div>
                 <div class="header-text">
                     <h1 class="trust-title">SHREYAS FOUNDATION — ATTACHED DOCUMENT (4 OF 5)</h1>
@@ -876,7 +900,7 @@
         <div class="admission-sheet page-break">
             <div class="header-container" style="padding-bottom: 6px; margin-bottom: 8px;">
                 <div class="logo-area">
-                    <img src="https://shreyasfoundation.blob.core.windows.net/media/shreyas_logo.png?se=2026-11-23T11%3A09%3A46Z&sp=r&sv=2026-10-06&sr=b&sig=ehoL0pbh2TrK7dSt%2BEBbWPvmRBwrioGCW/x/VgoXz9A%3D" alt="Shreyas Foundation Logo" class="school-logo-img" />
+                    <img src="https://shreyasfoundation.blob.core.windows.net/media/shreyas_logo.png?se=2026-11-23T11%3A28%3A24Z&sp=r&sv=2026-10-06&sr=b&sig=oW%2B7twUx%2BZhbtcK9x49mViSup7De4w7vCV8XEZkOIaA%3D" alt="Shreyas Foundation Logo" class="school-logo-img" />
                 </div>
                 <div class="header-text">
                     <h1 class="trust-title">SHREYAS FOUNDATION — ATTACHED DOCUMENT (5 OF 5)</h1>
@@ -887,7 +911,9 @@
 
             <div class="full-doc-container">
                 
-                <embed src="https://example.com/hc.pdf#toolbar=0&navpanes=0&scrollbar=0" type="application/pdf" class="full-doc-pdf-frame" />
+                <div class="pdf-canvas-list" data-pdf-url="https://example.com/hc.pdf" data-doc-label="Doctor&#x27;s Health Certificate">
+                    <div class="pdf-loading-msg">Rendering PDF Document (Doctor&#x27;s Health Certificate)...</div>
+                </div>
                 
             </div>
 
@@ -898,5 +924,68 @@
         </div>
             
         
+    <script>
+        // Render any attached PDF documents into static, non-scrollable A4 canvas images so they print 100% cleanly without scrollbars
+        document.addEventListener("DOMContentLoaded", function () {
+            if (!window.pdfjsLib) return;
+            window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+            var containers = document.querySelectorAll(".pdf-canvas-list");
+            containers.forEach(function (container) {
+                var pdfUrl = container.getAttribute("data-pdf-url");
+                if (!pdfUrl) return;
+                var proxyUrl = "/api/admin/download-file/?url=" + encodeURIComponent(pdfUrl);
+                var urlParams = new URLSearchParams(window.location.search);
+                var token = urlParams.get("token") || urlParams.get("access_token");
+                if (token) {
+                    proxyUrl += "&token=" + encodeURIComponent(token);
+                }
+
+                window.pdfjsLib.getDocument(proxyUrl).promise.then(function (pdfDoc) {
+                    container.innerHTML = "";
+                    for (var pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
+                        (function (pNum) {
+                            pdfDoc.getPage(pNum).then(function (page) {
+                                var viewport = page.getViewport({ scale: 2.0 });
+                                var canvas = document.createElement("canvas");
+                                var ctx = canvas.getContext("2d");
+                                canvas.width = viewport.width;
+                                canvas.height = viewport.height;
+                                page.render({ canvasContext: ctx, viewport: viewport }).promise.then(function () {
+                                    var img = document.createElement("img");
+                                    img.src = canvas.toDataURL("image/png");
+                                    img.className = "pdf-page-img";
+                                    container.appendChild(img);
+                                });
+                            });
+                        })(pageNum);
+                    }
+                }).catch(function () {
+                    // Fallback direct load if proxy not needed
+                    window.pdfjsLib.getDocument(pdfUrl).promise.then(function (pdfDoc) {
+                        container.innerHTML = "";
+                        for (var pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
+                            (function (pNum) {
+                                pdfDoc.getPage(pNum).then(function (page) {
+                                    var viewport = page.getViewport({ scale: 2.0 });
+                                    var canvas = document.createElement("canvas");
+                                    var ctx = canvas.getContext("2d");
+                                    canvas.width = viewport.width;
+                                    canvas.height = viewport.height;
+                                    page.render({ canvasContext: ctx, viewport: viewport }).promise.then(function () {
+                                        var img = document.createElement("img");
+                                        img.src = canvas.toDataURL("image/png");
+                                        img.className = "pdf-page-img";
+                                        container.appendChild(img);
+                                    });
+                                });
+                            })(pageNum);
+                        }
+                    }).catch(function () {
+                        container.innerHTML = '<img src="' + pdfUrl + '" class="full-doc-img" alt="Document" />';
+                    });
+                });
+            });
+        });
+    </script>
 </body>
 </html>

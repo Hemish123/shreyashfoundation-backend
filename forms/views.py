@@ -3093,8 +3093,11 @@ def generate_professional_school_admission_form_html(forms_list):
             is_word = clean_path_lower.endswith(".doc") or clean_path_lower.endswith(".docx")
 
             if is_pdf:
+                # Render PDF pages as crisp static canvas images using PDF.js (No inner scrollbars, prints 100% cleanly)
                 preview_html = f"""
-                <embed src="{esc(ann_url)}#toolbar=0&navpanes=0&scrollbar=0" type="application/pdf" class="full-doc-pdf-frame" />
+                <div class="pdf-canvas-list" data-pdf-url="{esc(ann_url)}" data-doc-label="{esc(ann_label)}">
+                    <div class="pdf-loading-msg">Rendering PDF Document ({esc(ann_label)})...</div>
+                </div>
                 """
             elif is_word:
                 preview_html = f"""
@@ -3859,32 +3862,55 @@ def generate_professional_school_admission_form_html(forms_list):
         }}
         .full-doc-container {{
             width: 100%;
-            height: 235mm;
+            min-height: 225mm;
             border: 1px solid #cbd5e1;
             border-radius: 4px;
-            background: #fafaf9;
+            background: #ffffff;
             display: flex;
+            flex-direction: column;
             align-items: center;
             justify-content: center;
-            padding: 8px;
-            overflow: hidden;
+            padding: 6px;
+            overflow: hidden !important;
         }}
         .full-doc-img-wrapper {{
             width: 100%;
-            height: 100%;
             display: flex;
             align-items: center;
             justify-content: center;
+            overflow: hidden !important;
         }}
         .full-doc-img {{
             max-width: 100%;
-            max-height: 228mm;
+            max-height: 225mm;
+            width: auto;
+            height: auto;
             object-fit: contain;
+            display: block;
+            margin: 0 auto;
         }}
-        .full-doc-pdf-frame {{
+        .pdf-canvas-list {{
             width: 100%;
-            height: 228mm;
-            border: none;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            overflow: hidden !important;
+        }}
+        .pdf-page-img {{
+            max-width: 100%;
+            max-height: 225mm;
+            width: auto;
+            height: auto;
+            object-fit: contain;
+            display: block;
+            margin: 0 auto;
+        }}
+        .pdf-loading-msg {{
+            font-size: 11px;
+            color: #475569;
+            padding: 20px;
         }}
         .annexure-doc-box {{
             padding: 24px;
@@ -3909,6 +3935,7 @@ def generate_professional_school_admission_form_html(forms_list):
             }}
         }}
     </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 </head>
 <body>
     <div class="top-action-bar no-print">
@@ -3918,6 +3945,69 @@ def generate_professional_school_admission_form_html(forms_list):
         </div>
     </div>
     {cards_html}
+    <script>
+        // Render any attached PDF documents into static, non-scrollable A4 canvas images so they print 100% cleanly without scrollbars
+        document.addEventListener("DOMContentLoaded", function () {{
+            if (!window.pdfjsLib) return;
+            window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+            var containers = document.querySelectorAll(".pdf-canvas-list");
+            containers.forEach(function (container) {{
+                var pdfUrl = container.getAttribute("data-pdf-url");
+                if (!pdfUrl) return;
+                var proxyUrl = "/api/admin/download-file/?url=" + encodeURIComponent(pdfUrl);
+                var urlParams = new URLSearchParams(window.location.search);
+                var token = urlParams.get("token") || urlParams.get("access_token");
+                if (token) {{
+                    proxyUrl += "&token=" + encodeURIComponent(token);
+                }}
+
+                window.pdfjsLib.getDocument(proxyUrl).promise.then(function (pdfDoc) {{
+                    container.innerHTML = "";
+                    for (var pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {{
+                        (function (pNum) {{
+                            pdfDoc.getPage(pNum).then(function (page) {{
+                                var viewport = page.getViewport({{ scale: 2.0 }});
+                                var canvas = document.createElement("canvas");
+                                var ctx = canvas.getContext("2d");
+                                canvas.width = viewport.width;
+                                canvas.height = viewport.height;
+                                page.render({{ canvasContext: ctx, viewport: viewport }}).promise.then(function () {{
+                                    var img = document.createElement("img");
+                                    img.src = canvas.toDataURL("image/png");
+                                    img.className = "pdf-page-img";
+                                    container.appendChild(img);
+                                }});
+                            }});
+                        }})(pageNum);
+                    }}
+                }}).catch(function () {{
+                    // Fallback direct load if proxy not needed
+                    window.pdfjsLib.getDocument(pdfUrl).promise.then(function (pdfDoc) {{
+                        container.innerHTML = "";
+                        for (var pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {{
+                            (function (pNum) {{
+                                pdfDoc.getPage(pNum).then(function (page) {{
+                                    var viewport = page.getViewport({{ scale: 2.0 }});
+                                    var canvas = document.createElement("canvas");
+                                    var ctx = canvas.getContext("2d");
+                                    canvas.width = viewport.width;
+                                    canvas.height = viewport.height;
+                                    page.render({{ canvasContext: ctx, viewport: viewport }}).promise.then(function () {{
+                                        var img = document.createElement("img");
+                                        img.src = canvas.toDataURL("image/png");
+                                        img.className = "pdf-page-img";
+                                        container.appendChild(img);
+                                    }});
+                                }});
+                            }})(pageNum);
+                        }}
+                    }}).catch(function () {{
+                        container.innerHTML = '<img src="' + pdfUrl + '" class="full-doc-img" alt="Document" />';
+                    }});
+                }});
+            }});
+        }});
+    </script>
 </body>
 </html>"""
 
