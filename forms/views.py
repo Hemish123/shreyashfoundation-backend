@@ -4633,8 +4633,30 @@ class AdminPrintPhysicalFormView(APIView):
                 "html": html_content
             }, status=status.HTTP_200_OK)
 
-        # Serve directly over HTTP(S) so the page URL remains https://.../api/admin/applications/...
-        # and automatically downloads the real .pdf file (Admission_And_Quiz_SF-XXXX_StudentName.pdf)!
+        # Check if caller wants direct binary PDF download (Default when hitting /download/ or ?download=1)
+        is_direct_pdf_download = "download" in request.path.lower() or request.query_params.get("download") in ["1", "true"]
+        is_preview_requested = request.query_params.get("preview") in ["1", "true"] or request.query_params.get("no_auto_pdf") == "1"
+
+        # Generate and serve TRUE BINARY PDF directly from server with Content-Disposition: attachment
+        if is_direct_pdf_download and not is_preview_requested and len(applications) == 1:
+            try:
+                from .pdf_generator import generate_single_student_complete_pdf_stream
+                single_app = applications[0]
+                single_form_data = forms_data[0] if forms_data else {}
+                pdf_bytes = generate_single_student_complete_pdf_stream(single_app, single_form_data)
+
+                app_no_clean = re.sub(r'[^a-zA-Z0-9_\-]', '', str(single_app.application_number or f"SF_{single_app.id}"))
+                student_name_clean = re.sub(r'[^a-zA-Z0-9_\-]', '_', f"{single_app.child_first_name}_{single_app.child_surname}").strip('_')
+                download_filename = f"Admission_And_Quiz_{app_no_clean}_{student_name_clean}.pdf"
+
+                pdf_response = HttpResponse(pdf_bytes, content_type="application/pdf")
+                pdf_response['Content-Disposition'] = f'attachment; filename="{download_filename}"'
+                pdf_response['Content-Length'] = len(pdf_bytes)
+                return pdf_response
+            except Exception as e:
+                logger.error(f"Native PDF binary generation failed, falling back to HTML: {e}")
+
+        # Fallback / Preview HTML response
         response = HttpResponse(html_content, content_type="text/html; charset=utf-8")
         return response
 
