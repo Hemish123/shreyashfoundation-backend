@@ -4462,7 +4462,8 @@ class AdminPrintPhysicalFormView(APIView):
         student_name_str = f"{first_sp.get('first_name', '')} {first_sp.get('surname', '')}".strip()
         father_mother_str = f"{first_pp.get('father_name', '')} / {first_pp.get('mother_name', '')}".strip(" /")
         std_med_str = f"{first_fd.get('standard', '')} / {first_fd.get('medium', '')}".strip(" /")
-        assessment_summary_str = f"Part X: {px.get('total_part_x', 0)}/20 | Part Y: {py.get('total_part_y', 0)}/30 | Final Aggregate: {first_sc.get('final_score', 0)}/50"
+        rewards_val = round(float(px.get('alak_malak', 0) or 0) + float(px.get('sibling_vk', 0) or 0), 2)
+        assessment_summary_str = f"Part X (Quiz): {px.get('total_part_x', 0)}/50 | Part Y: {py.get('total_part_y', 0)}/30 | Rewards: {rewards_val}/13 | Final Aggregate: {first_sc.get('final_score', 0)}/93"
 
         # Check if caller specifically requested raw JSON
         print_format = (request.query_params.get("format") or request.query_params.get("view") or "").lower().strip()
@@ -4482,17 +4483,13 @@ class AdminPrintPhysicalFormView(APIView):
 
         response = HttpResponse(html_content, content_type="text/html; charset=utf-8")
 
-        # Check if download mode was requested (either via /download/ URL path or ?download=1 query param)
-        is_download = (
-            request.query_params.get("download", "").lower() in ["1", "true", "yes"]
-            or "download" in request.path.lower()
-        )
-        if is_download:
-            app_no_clean = first_fd.get("application_number") or "Bulk"
-            safe_student = re.sub(r"[^A-Za-z0-9_-]+", "_", student_name_str).strip("_") or "Student"
-            filename = f"Admission_And_Quiz_{app_no_clean}_{safe_student}.html"
-            response["Content-Disposition"] = f'attachment; filename="{filename}"'
-            response["Access-Control-Expose-Headers"] = "Content-Disposition"
+        # Direct File Download immediately when any of the print/download document APIs are hit
+        # (Note: /api/admission-form/?submission_id=195 remains completely untouched as JSON / frontend form view)
+        app_no_clean = first_fd.get("application_number") or "Bulk"
+        safe_student = re.sub(r"[^A-Za-z0-9_-]+", "_", student_name_str).strip("_") or "Student"
+        filename = f"Admission_And_Quiz_{app_no_clean}_{safe_student}.html"
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        response["Access-Control-Expose-Headers"] = "Content-Disposition"
 
         return response
 

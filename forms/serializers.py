@@ -51,12 +51,12 @@ class QuizSubmissionListSerializer(serializers.ModelSerializer):
 
     def get_print_document_url(self, obj):
         if hasattr(obj, 'admission_application') and obj.admission_application:
-            return f"/api/admin/applications/download/?submission_id={obj.id}"
+            return f"/api/admin/applications/{obj.admission_application.application_number}/print/"
         return None
 
     def get_download_document_url(self, obj):
         if hasattr(obj, 'admission_application') and obj.admission_application:
-            return f"/api/admin/applications/download/?submission_id={obj.id}&download=1"
+            return f"/api/admin/applications/download/?submission_id={obj.id}"
         return None
 
     def get_ai_evaluations(self, obj):
