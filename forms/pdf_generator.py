@@ -4,7 +4,13 @@ import re
 import logging
 import requests
 from PIL import Image
-import PyPDF2
+try:
+    import PyPDF2  # type: ignore
+except ImportError:
+    try:
+        import pypdf as PyPDF2  # type: ignore
+    except ImportError:
+        PyPDF2 = None
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
