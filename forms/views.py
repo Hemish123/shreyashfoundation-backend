@@ -3986,6 +3986,29 @@ def generate_professional_school_admission_form_html(forms_list):
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 </head>
 <body data-pdf-filename="{pdf_filename}">
+    <div id="pdf-download-overlay" class="no-print" style="position:fixed; top:0; left:0; right:0; bottom:0; background:#f8fafc; z-index:999999; display:flex; flex-direction:column; align-items:center; justify-content:center; font-family:'Segoe UI',sans-serif;">
+        <div style="background:#ffffff; padding:36px 48px; border-radius:16px; box-shadow:0 10px 30px rgba(0,0,0,0.1); border:1px solid #e2e8f0; text-align:center; max-width:440px; width:90%;">
+            <img src="{shreyas_logo_url}" alt="Shreyas Logo" style="width:72px; height:72px; object-fit:contain; margin-bottom:16px;" />
+            <h3 style="margin:0 0 8px 0; color:#0f3d2e; font-size:18px; font-weight:700;">Shreyas Foundation</h3>
+            <p id="overlay-msg" style="margin:0 0 20px 0; color:#64748b; font-size:14px; line-height:1.5;">Preparing your official Admission Document &amp; Quiz Report...</p>
+            <div id="overlay-progress-bar" style="width:100%; height:6px; background:#e2e8f0; border-radius:3px; overflow:hidden; position:relative; margin-bottom:18px;">
+                <div style="width:50%; height:100%; background:#0f3d2e; border-radius:3px; animation:shreyasPulse 1.2s infinite ease-in-out;"></div>
+            </div>
+            <div id="overlay-status-text" style="font-size:13px; font-weight:600; color:#0f3d2e; display:flex; align-items:center; justify-content:center; gap:8px;">
+                <span>⏳ Downloading PDF...</span>
+            </div>
+            <div id="overlay-fallback" style="margin-top:16px; display:none;">
+                <p style="font-size:12px; color:#64748b; margin-bottom:8px;">If download didn't start automatically:</p>
+                <button onclick="window.downloadTruePdfFile()" style="background:#0f3d2e; color:#fff; border:none; padding:8px 18px; border-radius:6px; font-size:13px; font-weight:600; cursor:pointer;">📥 Click Here to Download PDF</button>
+            </div>
+        </div>
+    </div>
+    <style>
+        @keyframes shreyasPulse {{
+            0% {{ transform: translateX(-100%); }}
+            100% {{ transform: translateX(200%); }}
+        }}
+    </style>
     <div class="top-action-bar no-print">
         <div class="bar-title"><img src="{shreyas_logo_url}" alt="Logo" class="top-bar-logo" /> Shreyas Foundation — Official Admission Form &amp; Parental Quiz Result Document</div>
         <div class="bar-actions">
@@ -4066,9 +4089,17 @@ def generate_professional_school_admission_form_html(forms_list):
             window.downloadTruePdfFile = async function () {{
                 var toast = document.getElementById("pdf-generation-toast");
                 var btn = document.getElementById("btn-download-pdf");
+                var overlay = document.getElementById("pdf-download-overlay");
+                var overlayStatus = document.getElementById("overlay-status-text");
+                var overlayMsg = document.getElementById("overlay-msg");
+                var overlayFallback = document.getElementById("overlay-fallback");
+
                 if (toast) {{
                     toast.style.display = "flex";
                     toast.innerHTML = "<span>⏳ Generating high-quality PDF document...</span>";
+                }}
+                if (overlayStatus) {{
+                    overlayStatus.innerHTML = "<span>⏳ Rendering PDF pages, please wait...</span>";
                 }}
                 if (btn) btn.disabled = true;
 
@@ -4078,6 +4109,9 @@ def generate_professional_school_admission_form_html(forms_list):
                     var pdf = new jsPDF({{ orientation: "portrait", unit: "mm", format: "a4", compress: true }});
 
                     for (var i = 0; i < sheets.length; i++) {{
+                        if (overlayStatus) {{
+                            overlayStatus.innerHTML = "<span>📄 Processing page " + (i + 1) + " of " + sheets.length + "...</span>";
+                        }}
                         var sheet = sheets[i];
                         var canvas = await window.html2canvas(sheet, {{
                             scale: 2,
@@ -4105,24 +4139,61 @@ def generate_professional_school_admission_form_html(forms_list):
                         toast.innerHTML = "<span>✅ PDF Downloaded (" + filename + ")</span>";
                         setTimeout(function () {{ toast.style.display = "none"; }}, 4000);
                     }}
+
+                    if (overlayStatus) {{
+                        overlayStatus.innerHTML = "<span style='color:#166534;'>✅ PDF Download Completed!</span>";
+                    }}
+                    if (overlayMsg) {{
+                        overlayMsg.innerText = "Your document has been downloaded successfully.";
+                    }}
+                    var pBar = document.getElementById("overlay-progress-bar");
+                    if (pBar) pBar.style.display = "none";
+
+                    // If opened via auto-download, notify parent window / close tab after 2.5s
+                    setTimeout(function () {{
+                        if (window.parent && window.parent !== window) {{
+                            window.parent.postMessage({{ event: "PDF_DOWNLOAD_COMPLETE", filename: filename }}, "*");
+                        }}
+                        // Try closing tab if it was opened just for download
+                        if (window.opener) {{
+                            window.close();
+                        }} else if (overlay) {{
+                            // Otherwise gracefully fade overlay out so user can view/re-download if desired
+                            overlay.style.transition = "opacity 0.6s ease";
+                            overlay.style.opacity = "0";
+                            setTimeout(function () {{ overlay.style.display = "none"; }}, 600);
+                        }}
+                    }}, 1800);
+
                 }} catch (err) {{
                     console.error("PDF generation failed, falling back to print dialog:", err);
                     if (toast) toast.style.display = "none";
+                    if (overlayStatus) {{
+                        overlayStatus.innerHTML = "<span style='color:#dc2626;'>⚠️ Download delayed</span>";
+                    }}
+                    if (overlayFallback) overlayFallback.style.display = "block";
                     window.print();
                 }} finally {{
                     if (btn) btn.disabled = false;
                 }}
             }};
 
+            // Check if preview mode is explicitly requested (?preview=1 or ?no_auto_pdf=1)
+            var params = new URLSearchParams(window.location.search);
+            var isExplicitPreview = params.get("preview") === "1" || params.get("no_auto_pdf") === "1";
+            var overlayEl = document.getElementById("pdf-download-overlay");
+
+            if (isExplicitPreview && overlayEl) {{
+                overlayEl.style.display = "none";
+                var t = document.getElementById("pdf-generation-toast");
+                if (t) t.style.display = "none";
+            }}
+
             // Wait for all embedded PDFs and images to finish rendering, then auto-download the .pdf file!
             Promise.all(allPdfPromises).then(function () {{
                 setTimeout(function () {{
-                    var params = new URLSearchParams(window.location.search);
-                    if (params.get("no_auto_pdf") !== "1") {{
+                    if (!isExplicitPreview) {{
                         window.downloadTruePdfFile();
-                    }} else {{
-                        var toast = document.getElementById("pdf-generation-toast");
-                        if (toast) toast.style.display = "none";
                     }}
                 }}, 600);
             }});
