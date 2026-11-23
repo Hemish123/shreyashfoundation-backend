@@ -54,12 +54,13 @@ def trigger_saas_crm_template(phone: str, template_name: str, parameters: dict =
     crm_url = WHATSAPP_CRM_WEBHOOK_URL
 
     clean_phone = normalize_phone_number(phone)
-    phone_number_id = getattr(settings, 'WHATSAPP_PHONE_NUMBER_ID', '1481244255068012')
+    phone_number_id = str(getattr(settings, 'WHATSAPP_PHONE_NUMBER_ID', '') or os.getenv('WHATSAPP_PHONE_NUMBER_ID', '') or '1481244255068012').strip()
     callback_url = "https://shreyashfoundation-e6eagcdeebbbhwgd.centralindia-01.azurewebsites.net/api/whatsapp/webhook/"
 
     msg_payload = {
         "event": "LOG_TEMPLATE" if message_id else "TRIGGER_TEMPLATE",
         "phone": clean_phone,
+        "phone_number_id": phone_number_id,
         "template_name": template_name,
         "language": language or "en",
         "parameters": parameters or {},
@@ -72,6 +73,7 @@ def trigger_saas_crm_template(phone: str, template_name: str, parameters: dict =
 
     payload = {
         "object": "whatsapp_business_account",
+        "phone_number_id": phone_number_id,
         "entry": [
             {
                 "changes": [
@@ -79,7 +81,7 @@ def trigger_saas_crm_template(phone: str, template_name: str, parameters: dict =
                         "field": "messages",
                         "value": {
                             "metadata": {
-                                "phone_number_id": str(phone_number_id)
+                                "phone_number_id": phone_number_id
                             },
                             "messages": [msg_payload]
                         }
