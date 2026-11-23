@@ -690,26 +690,50 @@ class AdmissionApplicationSerializer(serializers.ModelSerializer):
 
 class EvaluationAssessmentSerializer(serializers.Serializer):
     """
-    Serializer for Academicians/Educators filling Part Y Digital Assessment
-    Cognitive Assessment 1: max 5
-    Cognitive Assessment 2: max 5
-    Affective Assessment: max 10
-    Psychomotor Assessment: max 10
-    Total Part Y: 30 marks
+    Serializer for Admin / Academicians filling Part Y Assessment (Out of 30 Marks).
+    Supports EITHER:
+    1. A single direct field out of 30 marks: `part_y_score` (or `total_part_y_score` or `marks`)
+    2. OR breakdown fields: `cognitive_assessment_1` (5) + `cognitive_assessment_2` (5) + `affective_assessment` (10) + `psychomotor_assessment` (10)
     """
+    part_y_score = serializers.FloatField(required=False, min_value=0.0, max_value=30.0)
+    total_part_y_score = serializers.FloatField(required=False, min_value=0.0, max_value=30.0)
+    marks = serializers.FloatField(required=False, min_value=0.0, max_value=30.0)
     m_tag = serializers.CharField(required=False, allow_blank=True, default="")
     mi_tag = serializers.CharField(required=False, allow_blank=True, default="")
-    cognitive_assessment_1 = serializers.FloatField(required=True, min_value=0.0, max_value=5.0)
-    cognitive_assessment_2 = serializers.FloatField(required=True, min_value=0.0, max_value=5.0)
-    affective_assessment = serializers.FloatField(required=True, min_value=0.0, max_value=10.0)
-    psychomotor_assessment = serializers.FloatField(required=True, min_value=0.0, max_value=10.0)
+    cognitive_assessment_1 = serializers.FloatField(required=False, default=0.0, min_value=0.0, max_value=5.0)
+    cognitive_assessment_2 = serializers.FloatField(required=False, default=0.0, min_value=0.0, max_value=5.0)
+    affective_assessment = serializers.FloatField(required=False, default=0.0, min_value=0.0, max_value=10.0)
+    psychomotor_assessment = serializers.FloatField(required=False, default=0.0, min_value=0.0, max_value=10.0)
+
+    def validate(self, attrs):
+        direct_val = (
+            attrs.get('part_y_score')
+            if attrs.get('part_y_score') is not None
+            else (
+                attrs.get('total_part_y_score')
+                if attrs.get('total_part_y_score') is not None
+                else attrs.get('marks')
+            )
+        )
+        has_breakdown = any(
+            k in self.initial_data
+            for k in ['cognitive_assessment_1', 'cognitive_assessment_2', 'affective_assessment', 'psychomotor_assessment']
+        )
+        if direct_val is None and not has_breakdown:
+            raise serializers.ValidationError({
+                "part_y_score": "Please provide 'part_y_score' (0 to 30) or assessment domain marks."
+            })
+        attrs['direct_part_y_score'] = direct_val
+        return attrs
 
 
 class MeritRankBoardSerializer(serializers.ModelSerializer):
     student_name = serializers.SerializerMethodField()
     parent_name = serializers.SerializerMethodField()
     contact_number = serializers.SerializerMethodField()
+    quiz_score = serializers.SerializerMethodField()
     mcq_score = serializers.SerializerMethodField()
+    reward_marks = serializers.SerializerMethodField()
 
     class Meta:
         model = AdmissionApplication
@@ -723,19 +747,21 @@ class MeritRankBoardSerializer(serializers.ModelSerializer):
             'medium',
             'vibhag',
             'contact_number',
+            'quiz_score',
             'mcq_score',
+            'total_part_x_score',
+            'total_part_y_score',
             'alak_malak_months',
             'alak_malak_score',
             'sibling_opted_vk',
             'sibling_score',
-            'total_part_x_score',
+            'reward_marks',
             'evaluator_m',
             'evaluator_mi',
             'cognitive_assessment_1',
             'cognitive_assessment_2',
             'affective_assessment',
             'psychomotor_assessment',
-            'total_part_y_score',
             'final_aggregate_score',
             'admission_status',
             'interaction_date',
@@ -754,10 +780,14 @@ class MeritRankBoardSerializer(serializers.ModelSerializer):
     def get_contact_number(self, obj):
         return obj.father_whatsapp or obj.mother_whatsapp or (obj.submission.whatsapp_number if obj.submission else "")
 
+    def get_quiz_score(self, obj):
+        if obj.submission and obj.submission.score:
+            return float(obj.submission.score)
+        return float(obj.total_part_x_score or 0.0)
+
     def get_mcq_score(self, obj):
-        if obj.mcq_score_part_x:
-            return obj.mcq_score_part_x
-        if obj.submission:
-            return obj.submission.score
-        return 0.0
+        return self.get_quiz_score(obj)
+
+    def get_reward_marks(self, obj):
+        return round(float(obj.alak_malak_score or 0.0) + float(obj.sibling_score or 0.0), 2)
 

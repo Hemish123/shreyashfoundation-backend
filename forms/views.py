@@ -2195,8 +2195,10 @@ class AdmissionApplicationView(APIView):
 
         serializer = AdmissionApplicationSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
-            # 1. Save Application
+            # 1. Save Application & Calculate Part X (Quiz out of 50) + Reward Marks (Alak Malak + Sibling VK)
             application = serializer.save(submission=submission, form_submitted_at=timezone.now())
+            from .evaluation_service import calculate_part_x_score
+            calculate_part_x_score(application, save=True)
             logger.info(f"[POST /api/admission-form/] Form SUBMITTED SUCCESSFULLY! Application Number: {application.application_number}")
 
             # 2. Dynamic Interaction Slot Auto-Allocation (10 kids/slot, 4 slots/day, Mon-Sat)
@@ -2461,10 +2463,32 @@ class AdmissionApplicationView(APIView):
                 if phone_updated:
                     updated_app.father_whatsapp = submission.whatsapp_number
                     updated_app.save(update_fields=['father_whatsapp'])
+
+                # Recalculate Part X + Part Y + Reward Marks and Merit Rank if score/bonus fields were updated
+                from .evaluation_service import calculate_part_x_score, save_part_y_evaluation
+                if 'part_y_score' in request.data or 'total_part_y_score' in request.data:
+                    raw_py = request.data.get('part_y_score') if 'part_y_score' in request.data else request.data.get('total_part_y_score')
+                    try:
+                        save_part_y_evaluation(
+                            application=updated_app,
+                            evaluator_user=logged_in_admin,
+                            m_tag=request.data.get('evaluator_m', updated_app.evaluator_m),
+                            mi_tag=request.data.get('evaluator_mi', updated_app.evaluator_mi),
+                            cognitive_1=updated_app.cognitive_assessment_1,
+                            cognitive_2=updated_app.cognitive_assessment_2,
+                            affective=updated_app.affective_assessment,
+                            psychomotor=updated_app.psychomotor_assessment,
+                            direct_part_y_score=float(raw_py)
+                        )
+                    except (ValueError, TypeError):
+                        pass
+                else:
+                    calculate_part_x_score(updated_app, save=True)
+
                 return Response({
                     "status": "success",
                     "message": "Application and enquiry updated successfully by Admin.",
-                    "data": serializer.data
+                    "data": AdmissionApplicationSerializer(updated_app).data
                 }, status=status.HTTP_200_OK)
             else:
                 return Response({
@@ -2592,6 +2616,8 @@ class AdminEvaluationAssessmentView(APIView):
                     written_answers[str(q_id)] = ans_text
             ai_evaluations = answers_dict.get("ai_evaluations", {})
 
+        reward_marks = round((application.alak_malak_score or 0.0) + (application.sibling_score or 0.0), 2)
+
         return Response({
             "status": "success",
             "application_id": application.id,
@@ -2610,19 +2636,14 @@ class AdminEvaluationAssessmentView(APIView):
             "parent_written_responses": written_answers,
             "ai_written_evaluations": ai_evaluations,
             "part_x": {
-                "max_marks": 20,
-                "alak_malak_months": application.alak_malak_months,
-                "alak_malak_score": application.alak_malak_score,
-                "alak_malak_certificate_uploaded": bool(application.alak_malak_certificate),
-                "mcq_score": application.mcq_score_part_x,
-                "sibling_in_shreyas": application.has_sibling_in_shreyas,
-                "sibling_opted_vk": application.sibling_opted_vk,
-                "sibling_receipt_uploaded": bool(application.sibling_vikas_kendra_1_receipt or application.sibling_vikas_kendra_2_receipt),
-                "sibling_score": application.sibling_score,
+                "max_marks": 50,
+                "description": "Parental Quiz Total Score (out of 50)",
+                "quiz_score": application.total_part_x_score,
                 "total_part_x_score": application.total_part_x_score
             },
             "part_y": {
                 "max_marks": 30,
+                "description": "Admin / Educator Evaluation Marks (out of 30)",
                 "evaluator": application.evaluator.full_name or application.evaluator.username if application.evaluator else None,
                 "m_tag": application.evaluator_m or "",
                 "mi_tag": application.evaluator_mi or "",
@@ -2630,9 +2651,22 @@ class AdminEvaluationAssessmentView(APIView):
                 "cognitive_assessment_2": application.cognitive_assessment_2 or 0.0,
                 "affective_assessment": application.affective_assessment or 0.0,
                 "psychomotor_assessment": application.psychomotor_assessment or 0.0,
+                "part_y_score": application.total_part_y_score or 0.0,
                 "total_part_y_score": application.total_part_y_score or 0.0
             },
+            "reward_marks": {
+                "max_marks": 13,
+                "alak_malak_months": application.alak_malak_months,
+                "alak_malak_certificate_uploaded": bool(application.alak_malak_certificate),
+                "alak_malak_score": application.alak_malak_score or 0.0,
+                "sibling_in_shreyas": application.has_sibling_in_shreyas,
+                "sibling_opted_vk": application.sibling_opted_vk,
+                "sibling_receipt_uploaded": bool(application.sibling_vikas_kendra_1_receipt or application.sibling_vikas_kendra_2_receipt),
+                "sibling_score": application.sibling_score or 0.0,
+                "total_reward_marks": reward_marks
+            },
             "final_aggregate_score": application.final_aggregate_score or 0.0,
+            "max_total_score": 93,
             "merit_rank": application.merit_rank,
             "admission_status": application.admission_status
         }, status=status.HTTP_200_OK)
@@ -2670,17 +2704,24 @@ class AdminEvaluationAssessmentView(APIView):
             cognitive_1=vd.get('cognitive_assessment_1', 0.0),
             cognitive_2=vd.get('cognitive_assessment_2', 0.0),
             affective=vd.get('affective_assessment', 0.0),
-            psychomotor=vd.get('psychomotor_assessment', 0.0)
+            psychomotor=vd.get('psychomotor_assessment', 0.0),
+            direct_part_y_score=vd.get('direct_part_y_score')
         )
+        reward_marks = round((application.alak_malak_score or 0.0) + (application.sibling_score or 0.0), 2)
 
         return Response({
             "status": "success",
-            "message": f"Digital assessment evaluated and saved successfully for {application.application_number}.",
+            "message": f"Evaluation saved and merit rank updated for {application.application_number}.",
             "application_id": application.id,
             "application_number": application.application_number,
             "part_x_score": application.total_part_x_score,
             "part_y_score": application.total_part_y_score,
+            "reward_marks": reward_marks,
+            "alak_malak_score": application.alak_malak_score,
+            "sibling_score": application.sibling_score,
             "final_aggregate_score": final_score,
+            "max_total_score": 93,
+            "merit_rank": application.merit_rank,
             "admission_status": application.admission_status
         }, status=status.HTTP_200_OK)
 
@@ -2904,11 +2945,11 @@ def _sign_azure_blob_url_if_needed(file_url: Optional[str]) -> Optional[str]:
     """
     if not file_url or not isinstance(file_url, str):
         return None
-    if "sig=" in file_url:
+    if "sig=" in file_url or file_url.startswith("data:"):
         return file_url
 
     try:
-        from urllib.parse import urlparse
+        from urllib.parse import urlparse, unquote
         parsed = urlparse(file_url)
         acct_name = getattr(settings, 'AZURE_ACCOUNT_NAME', None)
         acct_key = getattr(settings, 'AZURE_ACCOUNT_KEY', None)
@@ -2918,7 +2959,7 @@ def _sign_azure_blob_url_if_needed(file_url: Optional[str]) -> Optional[str]:
             from datetime import datetime, timedelta, timezone as dt_tz
             from azure.storage.blob import generate_blob_sas, BlobSasPermissions
 
-            clean_path = parsed.path.lstrip('/')
+            clean_path = unquote(parsed.path.lstrip('/'))
             container_prefix = f"{container}/"
             if clean_path.startswith(container_prefix):
                 blob_name = clean_path[len(container_prefix):]
@@ -2931,7 +2972,7 @@ def _sign_azure_blob_url_if_needed(file_url: Optional[str]) -> Optional[str]:
                 blob_name=blob_name,
                 account_key=acct_key,
                 permission=BlobSasPermissions(read=True),
-                expiry=datetime.now(dt_tz.utc) + timedelta(hours=2)
+                expiry=datetime.now(dt_tz.utc) + timedelta(hours=4)
             )
             if sas_token:
                 sep = "&" if "?" in file_url else "?"
@@ -2940,6 +2981,49 @@ def _sign_azure_blob_url_if_needed(file_url: Optional[str]) -> Optional[str]:
         logger.warning(f"[SAS SIGNING] Could not sign blob URL {file_url}: {e}")
 
     return file_url
+
+
+def _fetch_file_as_data_uri(file_url: Optional[str]) -> tuple[Optional[str], Optional[str], str]:
+    """
+    Downloads an uploaded document/image on the backend (using signed Azure SAS URL)
+    and returns (data_uri, base64_raw, mime_type) so the generated HTML file is 100% self-contained!
+    This guarantees that even when opened locally as a downloaded file (file:///C:/Users/.../Downloads/...html),
+    all images and PDFs render immediately without CORS blocks or broken image icons.
+    """
+    if not file_url or not isinstance(file_url, str):
+        return None, None, ""
+    if file_url.startswith("data:"):
+        return file_url, None, ""
+
+    signed_url = _sign_azure_blob_url_if_needed(file_url)
+    clean_lower = file_url.split("?")[0].lower()
+
+    import mimetypes
+    import base64
+    guessed_mime, _ = mimetypes.guess_type(clean_lower)
+    if clean_lower.endswith(".pdf"):
+        guessed_mime = "application/pdf"
+    elif clean_lower.endswith((".jpg", ".jpeg")):
+        guessed_mime = "image/jpeg"
+    elif clean_lower.endswith(".png"):
+        guessed_mime = "image/png"
+    elif clean_lower.endswith(".webp"):
+        guessed_mime = "image/webp"
+    else:
+        guessed_mime = guessed_mime or "image/jpeg"
+
+    try:
+        r = requests.get(signed_url, timeout=15)
+        if r.status_code == 200 and r.content:
+            content_type = r.headers.get("Content-Type", "").split(";")[0].strip()
+            if not content_type or content_type == "application/octet-stream":
+                content_type = guessed_mime
+            b64_str = base64.b64encode(r.content).decode("ascii")
+            return f"data:{content_type};base64,{b64_str}", b64_str, content_type
+    except Exception as e:
+        logger.warning(f"[INLINE DATA URI FETCH] Failed to inline {file_url}: {e}")
+
+    return signed_url, None, guessed_mime
 
 
 def generate_professional_school_admission_form_html(forms_list):
@@ -2980,10 +3064,10 @@ def generate_professional_school_admission_form_html(forms_list):
         sigs = item.get("signatures_and_declarations", {})
         quiz = item.get("quiz_result", {})
 
-        signed_photo_url = _sign_azure_blob_url_if_needed(sp.get("photo_url"))
-        signed_father_sig = _sign_azure_blob_url_if_needed(sigs.get("father_signature_url"))
-        signed_mother_sig = _sign_azure_blob_url_if_needed(sigs.get("mother_signature_url"))
-        signed_guardian_sig = _sign_azure_blob_url_if_needed(sigs.get("guardian_signature_url"))
+        signed_photo_url, _, _ = _fetch_file_as_data_uri(sp.get("photo_url"))
+        signed_father_sig, _, _ = _fetch_file_as_data_uri(sigs.get("father_signature_url"))
+        signed_mother_sig, _, _ = _fetch_file_as_data_uri(sigs.get("mother_signature_url"))
+        signed_guardian_sig, _, _ = _fetch_file_as_data_uri(sigs.get("guardian_signature_url"))
 
         photo_html = f'<img src="{signed_photo_url}" class="student-photo" alt="Student Photo" />' if signed_photo_url else '<div class="photo-placeholder">Affix Recent<br>Passport Size<br>Photograph Here</div>'
         father_sig_html = f'<img src="{signed_father_sig}" class="sig-img" />' if signed_father_sig else '<div class="sig-space"></div>'
@@ -3078,24 +3162,26 @@ def generate_professional_school_admission_form_html(forms_list):
         ]
         uploaded_annexures = []
         for doc_label, raw_doc_url in doc_items_list:
-            doc_url = _sign_azure_blob_url_if_needed(raw_doc_url)
-            if doc_url:
-                uploaded_annexures.append((doc_label, doc_url))
+            if raw_doc_url:
+                data_uri_or_url, b64_raw, mime_type = _fetch_file_as_data_uri(raw_doc_url)
+                signed_fallback_url = _sign_azure_blob_url_if_needed(raw_doc_url)
+                uploaded_annexures.append((doc_label, data_uri_or_url, b64_raw, mime_type, signed_fallback_url))
 
         total_pages_for_student = 2 + len(uploaded_annexures)
 
         # Build Dedicated Full-Page A4 Sheets for Each Uploaded Document
         annexures_page_html = ""
-        for ann_idx, (ann_label, ann_url) in enumerate(uploaded_annexures, start=1):
+        for ann_idx, (ann_label, doc_src, b64_raw, mime_type, signed_fallback_url) in enumerate(uploaded_annexures, start=1):
             current_page_num = 2 + ann_idx
-            clean_path_lower = ann_url.split("?")[0].lower()
-            is_pdf = clean_path_lower.endswith(".pdf")
+            clean_path_lower = (signed_fallback_url or "").split("?")[0].lower()
+            is_pdf = mime_type == "application/pdf" or clean_path_lower.endswith(".pdf")
             is_word = clean_path_lower.endswith(".doc") or clean_path_lower.endswith(".docx")
 
             if is_pdf:
-                # Render PDF pages as crisp static canvas images using PDF.js (No inner scrollbars, prints 100% cleanly)
+                # Pass inline base64 PDF data directly into data-pdf-b64 so PDF.js renders immediately even from file:// without CORS!
+                b64_attr = b64_raw or ""
                 preview_html = f"""
-                <div class="pdf-canvas-list" data-pdf-url="{esc(ann_url)}" data-doc-label="{esc(ann_label)}">
+                <div class="pdf-canvas-list" data-pdf-b64="{b64_attr}" data-pdf-url="{esc(signed_fallback_url)}" data-doc-label="{esc(ann_label)}">
                     <div class="pdf-loading-msg">Rendering PDF Document ({esc(ann_label)})...</div>
                 </div>
                 """
@@ -3109,7 +3195,7 @@ def generate_professional_school_admission_form_html(forms_list):
             else:
                 preview_html = f"""
                 <div class="full-doc-img-wrapper">
-                    <img src="{esc(ann_url)}" alt="{esc(ann_label)}" class="full-doc-img" />
+                    <img src="{doc_src}" alt="{esc(ann_label)}" class="full-doc-img" />
                 </div>
                 """
 
@@ -3900,64 +3986,64 @@ def generate_professional_school_admission_form_html(forms_list):
     {cards_html}
     <script>
         // Render any attached PDF documents into static, non-scrollable A4 canvas images so they print 100% cleanly without scrollbars
+        // Works both on http:// and when opened as a downloaded local file (file:///C:/Users/.../Downloads/...html) using inline Base64 bytes!
         document.addEventListener("DOMContentLoaded", function () {{
             if (!window.pdfjsLib) return;
             window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+            function renderPdfDocToContainer(pdfDoc, container) {{
+                container.innerHTML = "";
+                for (var pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {{
+                    (function (pNum) {{
+                        pdfDoc.getPage(pNum).then(function (page) {{
+                            var viewport = page.getViewport({{ scale: 2.0 }});
+                            var canvas = document.createElement("canvas");
+                            var ctx = canvas.getContext("2d");
+                            canvas.width = viewport.width;
+                            canvas.height = viewport.height;
+                            page.render({{ canvasContext: ctx, viewport: viewport }}).promise.then(function () {{
+                                var img = document.createElement("img");
+                                img.src = canvas.toDataURL("image/png");
+                                img.className = "pdf-page-img";
+                                container.appendChild(img);
+                            }});
+                        }});
+                    }})(pageNum);
+                }}
+            }}
+
             var containers = document.querySelectorAll(".pdf-canvas-list");
             containers.forEach(function (container) {{
+                var pdfB64 = container.getAttribute("data-pdf-b64");
                 var pdfUrl = container.getAttribute("data-pdf-url");
-                if (!pdfUrl) return;
-                var proxyUrl = "/api/admin/download-file/?url=" + encodeURIComponent(pdfUrl);
-                var urlParams = new URLSearchParams(window.location.search);
-                var token = urlParams.get("token") || urlParams.get("access_token");
-                if (token) {{
-                    proxyUrl += "&token=" + encodeURIComponent(token);
+
+                // 1. Primary: Render directly from embedded Base64 bytes (Zero network/CORS issues even on local file://)
+                if (pdfB64 && pdfB64.length > 10) {{
+                    try {{
+                        var raw = window.atob(pdfB64);
+                        var uint8Array = new Uint8Array(raw.length);
+                        for (var i = 0; i < raw.length; i++) {{
+                            uint8Array[i] = raw.charCodeAt(i);
+                        }}
+                        window.pdfjsLib.getDocument({{ data: uint8Array }}).promise.then(function (pdfDoc) {{
+                            renderPdfDocToContainer(pdfDoc, container);
+                        }}).catch(function (err) {{
+                            console.error("PDF.js base64 render error:", err);
+                        }});
+                        return;
+                    }} catch (e) {{
+                        console.error("Base64 decode error:", e);
+                    }}
                 }}
 
-                window.pdfjsLib.getDocument(proxyUrl).promise.then(function (pdfDoc) {{
-                    container.innerHTML = "";
-                    for (var pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {{
-                        (function (pNum) {{
-                            pdfDoc.getPage(pNum).then(function (page) {{
-                                var viewport = page.getViewport({{ scale: 2.0 }});
-                                var canvas = document.createElement("canvas");
-                                var ctx = canvas.getContext("2d");
-                                canvas.width = viewport.width;
-                                canvas.height = viewport.height;
-                                page.render({{ canvasContext: ctx, viewport: viewport }}).promise.then(function () {{
-                                    var img = document.createElement("img");
-                                    img.src = canvas.toDataURL("image/png");
-                                    img.className = "pdf-page-img";
-                                    container.appendChild(img);
-                                }});
-                            }});
-                        }})(pageNum);
-                    }}
-                }}).catch(function () {{
-                    // Fallback direct load if proxy not needed
+                // 2. Fallback: Load from URL if Base64 was not available
+                if (pdfUrl) {{
                     window.pdfjsLib.getDocument(pdfUrl).promise.then(function (pdfDoc) {{
-                        container.innerHTML = "";
-                        for (var pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {{
-                            (function (pNum) {{
-                                pdfDoc.getPage(pNum).then(function (page) {{
-                                    var viewport = page.getViewport({{ scale: 2.0 }});
-                                    var canvas = document.createElement("canvas");
-                                    var ctx = canvas.getContext("2d");
-                                    canvas.width = viewport.width;
-                                    canvas.height = viewport.height;
-                                    page.render({{ canvasContext: ctx, viewport: viewport }}).promise.then(function () {{
-                                        var img = document.createElement("img");
-                                        img.src = canvas.toDataURL("image/png");
-                                        img.className = "pdf-page-img";
-                                        container.appendChild(img);
-                                    }});
-                                }});
-                            }})(pageNum);
-                        }}
+                        renderPdfDocToContainer(pdfDoc, container);
                     }}).catch(function () {{
-                        container.innerHTML = '<img src="' + pdfUrl + '" class="full-doc-img" alt="Document" />';
+                        container.innerHTML = '<div class="pdf-loading-msg">Unable to preview PDF offline.</div>';
                     }});
-                }});
+                }}
             }});
         }});
     </script>

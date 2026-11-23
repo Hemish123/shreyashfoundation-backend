@@ -1,13 +1,16 @@
 """
 Evaluation, Scoring, Merit Ranking and Cutoff Engine
 Implements:
-- PART X (20 Marks): Alak Malak (+5/+10), Parent MCQ (+7 max), Sibling VK opted (+3 if receipt attached)
-- PART Y (30 Marks): Educator Assessment (M, MI, Cognitive 5+5, Affective 10, Psychomotor 10)
-- Total Score: Part X (20) + Part Y (30) = 50 Marks
-- First 80 Seats Cutoff & Automatic Waitlist Rollover on Cancellation
+- PART X (50 Marks): Parental Screening Quiz Total Score (out of 50: 30 MCQs + 20 Written)
+- PART Y (30 Marks): Admin / Educator Assessment from Admin Panel (Direct score out of 30, or Cognitive 5+5, Affective 10, Psychomotor 10)
+- REWARD / BONUS MARKS (13 Marks Max):
+    * Alak Malak Pre-Toddler Bonus: +5 (6 months) or +10 (12 months) with certificate
+    * Sibling in Shreyas Vikas Kendra (VK) Bonus: +3 if sibling opted for VK1/VK2/VK3 with receipt
+- Final Aggregate Merit Score: Part X (50) + Part Y (30) + Reward Marks (13) = Total out of 93 Marks
+- Top 80 Seats Cutoff (SELECTED) & Automatic Waitlist Rollover on Cancellation
 """
 import logging
-from django.db.models import F
+from typing import Optional
 from .models import AdmissionApplication
 
 logger = logging.getLogger(__name__)
@@ -15,47 +18,29 @@ logger = logging.getLogger(__name__)
 
 def calculate_part_x_score(application: AdmissionApplication, save: bool = True) -> float:
     """
-    Calculates PART X Score (Total 20 Marks):
-    1. Alak Malak (Pre-toddler program):
-       - 1 to 6 months completed (+5)
-       - 6 to 12 months completed (+10) [or two 6-month certificates]
-    2. Parents MCQ:
-       - Up to 7 marks from submission.score
-    3. Sibling VK program:
-       - +3 marks if sibling opted for VK1 / VK2 / VK3 AND receipt is present.
-       - 0 if not opted or no receipt.
+    Calculates PART X Score (Quiz Total out of 50 Marks) & REWARD / BONUS Marks (Alak Malak +10 & Sibling VK +3 = 13 Marks):
+    1. PART X (Max 50 Marks):
+       - Parental Quiz Total Score out of 50 (from submission.score or re-scored from submission.answers).
+    2. REWARD / BONUS MARKS (Max 13 Marks):
+       - Alak Malak Pre-toddler program: +5 (6 months) or +10 (12 months) if certificate uploaded.
+       - Sibling in Shreyas VK program: +3 marks if sibling opted for VK1/VK2/VK3 AND receipt is present.
+    3. Final Aggregate Score:
+       - Part X (out of 50) + Part Y (out of 30) + Reward Marks (out of 13) = Total out of 93 Marks.
     """
-    # 1. Alak Malak score
-    # Check if certificate uploaded
+    # 1. Alak Malak Reward Bonus (0, 5, or 10 marks)
     alak_score = 0.0
-    if application.alak_malak_certificate:
-        months = application.alak_malak_months or 6
-        if months >= 12:
-            alak_score = 10.0
-        elif months >= 6:
-            alak_score = 5.0
-        else:
-            alak_score = 5.0  # default base bonus for uploaded certificate
+    if application.alak_malak_certificate or application.has_attended_alak_malak:
+        if application.alak_malak_certificate:
+            months = application.alak_malak_months or 6
+            if months >= 12:
+                alak_score = 10.0
+            elif months >= 6:
+                alak_score = 5.0
+            else:
+                alak_score = 5.0
     application.alak_malak_score = alak_score
 
-    # 2. Parent MCQ score (out of 7)
-    mcq_score = 0.0
-    if application.submission:
-        sub_score = float(application.submission.score or 0)
-        # If score is from new 50-mark questionnaire (or 30-mark MCQ), map to 7 marks:
-        # e.g., (sub_score / 30.0) * 7.0 or if raw MCQ answers exist
-        from .questions_data import score_parent_questionnaire
-        if application.submission.answers:
-            res = score_parent_questionnaire(application.submission.answers)
-            mcq_score = float(res.get("mcq_scaled_to_7", 0.0))
-        elif sub_score > 7:
-            # Map score out of 30 or 50 to 7 marks
-            mcq_score = round(min((sub_score / 30.0) * 7.0, 7.0), 2)
-        else:
-            mcq_score = float(min(sub_score, 7.0))
-    application.mcq_score_part_x = mcq_score
-
-    # 3. Sibling VK benefit (+3 marks as per official chart, or 0)
+    # 2. Sibling in Shreyas VK Reward Bonus (+3 marks or 0)
     sibling_score = 0.0
     has_receipt = bool(
         application.sibling_vikas_kendra_1_receipt or
@@ -67,7 +52,6 @@ def calculate_part_x_score(application: AdmissionApplication, save: bool = True)
         application.sibling_opted_vk
     )
 
-    # Check multiple siblings list if present
     if hasattr(application, 'siblings') and isinstance(application.siblings, list) and len(application.siblings) > 0:
         for sib in application.siblings:
             r1 = sib.get('vk1_receipt') or sib.get('sibling_vikas_kendra_1_receipt')
@@ -90,11 +74,26 @@ def calculate_part_x_score(application: AdmissionApplication, save: bool = True)
         application.sibling_opted_vk = False
     application.sibling_score = sibling_score
 
-    total_x = min(alak_score + mcq_score + sibling_score, 20.0)
-    application.total_part_x_score = total_x
+    reward_marks = round(min(alak_score + sibling_score, 13.0), 2)
 
-    # Recalculate aggregate
-    application.final_aggregate_score = round(total_x + (application.total_part_y_score or 0.0), 2)
+    # 3. PART X: Quiz Total Score (out of 50 Marks)
+    quiz_total_50 = 0.0
+    if application.submission:
+        sub_score = float(application.submission.score or 0.0)
+        if sub_score > 0:
+            quiz_total_50 = min(sub_score, 50.0)
+        elif application.submission.answers:
+            from .questions_data import score_parent_questionnaire
+            res = score_parent_questionnaire(application.submission.answers, use_ai=False)
+            quiz_total_50 = min(float(res.get("total_score", 0.0)), 50.0)
+
+    quiz_total_50 = round(quiz_total_50, 2)
+    application.mcq_score_part_x = quiz_total_50
+    application.total_part_x_score = quiz_total_50
+
+    # 4. Final Aggregate Score = Part X (50) + Part Y (30) + Reward Marks (13)
+    part_y = float(application.total_part_y_score or 0.0)
+    application.final_aggregate_score = round(quiz_total_50 + part_y + reward_marks, 2)
 
     if save:
         application.save(update_fields=[
@@ -106,55 +105,69 @@ def calculate_part_x_score(application: AdmissionApplication, save: bool = True)
             'final_aggregate_score'
         ])
 
-    return total_x
+    return quiz_total_50
 
 
 def save_part_y_evaluation(
     application: AdmissionApplication,
     evaluator_user,
-    m_tag: str,
-    mi_tag: str,
-    cognitive_1: float,
-    cognitive_2: float,
-    affective: float,
-    psychomotor: float
+    m_tag: str = "",
+    mi_tag: str = "",
+    cognitive_1: float = 0.0,
+    cognitive_2: float = 0.0,
+    affective: float = 0.0,
+    psychomotor: float = 0.0,
+    direct_part_y_score: Optional[float] = None
 ) -> float:
     """
-    Saves PART Y Assessment (Total 30 Marks):
-    - Cognitive Assessment 1: max 5
-    - Cognitive Assessment 2: max 5
-    - Affective Assessment: max 10
-    - Psychomotor Assessment: max 10
+    Saves PART Y Assessment (Total 30 Marks) from Admin Panel:
+    Supports EITHER:
+    - A single direct Part Y score field out of 30 (direct_part_y_score / part_y_score / marks)
+    - OR domain breakdown: Cognitive 1 (5) + Cognitive 2 (5) + Affective (10) + Psychomotor (10) = 30
+    Then aggregates:
+    Final Merit Score = Part X (Quiz out of 50) + Part Y (out of 30) + Reward Marks (Alak Malak + Sibling VK out of 13)
     """
     cog1 = min(max(float(cognitive_1 or 0), 0.0), 5.0)
     cog2 = min(max(float(cognitive_2 or 0), 0.0), 5.0)
     aff = min(max(float(affective or 0), 0.0), 10.0)
     psy = min(max(float(psychomotor or 0), 0.0), 10.0)
 
-    total_y = round(cog1 + cog2 + aff + psy, 2)
+    if direct_part_y_score is not None:
+        total_y = round(min(max(float(direct_part_y_score), 0.0), 30.0), 2)
+    else:
+        total_y = round(cog1 + cog2 + aff + psy, 2)
 
     application.evaluator = evaluator_user
-    application.evaluator_m = m_tag or ""
-    application.evaluator_mi = mi_tag or ""
+    if m_tag is not None:
+        application.evaluator_m = m_tag
+    if mi_tag is not None:
+        application.evaluator_mi = mi_tag
     application.cognitive_assessment_1 = cog1
     application.cognitive_assessment_2 = cog2
     application.affective_assessment = aff
     application.psychomotor_assessment = psy
     application.total_part_y_score = total_y
 
-    # Calculate Part X if not already done
-    if not application.total_part_x_score:
-        calculate_part_x_score(application, save=False)
+    # Ensure Part X (Quiz out of 50) and Reward Marks (out of 13) are up-to-date
+    calculate_part_x_score(application, save=False)
 
-    application.final_aggregate_score = round(application.total_part_x_score + total_y, 2)
+    reward_marks = round((application.alak_malak_score or 0.0) + (application.sibling_score or 0.0), 2)
+    application.final_aggregate_score = round((application.total_part_x_score or 0.0) + total_y + reward_marks, 2)
+
     if application.admission_status in ['SUBMITTED', 'SCHEDULED']:
         application.admission_status = 'EVALUATED'
 
     application.save()
 
+    # Automatically recompute merit rank & top 80 cutoff for this Standard x Medium
+    if application.standard and application.medium:
+        recompute_merit_rank_and_cutoff(standard=application.standard, medium=application.medium, cutoff_seats=80)
+        application.refresh_from_db(fields=['merit_rank', 'admission_status'])
+
     logger.info(
-        f"[EVALUATION SAVED] App {application.application_number}: Part X={application.total_part_x_score}/20, "
-        f"Part Y={total_y}/30, Total={application.final_aggregate_score}/50"
+        f"[EVALUATION SAVED] App {application.application_number}: Part X (Quiz)={application.total_part_x_score}/50, "
+        f"Part Y={total_y}/30, Rewards={reward_marks}/13, Final Total={application.final_aggregate_score}/93, "
+        f"Rank=#{application.merit_rank} ({application.admission_status})"
     )
 
     return application.final_aggregate_score
