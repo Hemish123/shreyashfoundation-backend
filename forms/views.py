@@ -4562,31 +4562,8 @@ class AdminPrintPhysicalFormView(APIView):
                 "html": html_content
             }, status=status.HTTP_200_OK)
 
-        # Check if this is a direct download request (/download/ in URL or ?download=1)
-        # In download mode: return TRUE NATIVE BINARY PDF with Content-Disposition: attachment
-        # In print mode: return printable HTML with print layout
-        is_download_mode = (
-            "download" in request.path.lower() or
-            request.query_params.get("download") in ["1", "true", "yes"]
-        )
-
-        clean_student_slug = re.sub(r'[^a-zA-Z0-9_-]', '_', student_name_str)
-        pdf_filename = f"Admission_And_Quiz_{first_fd.get('application_number', 'Doc')}_{clean_student_slug}.pdf"
-
-        if is_download_mode and forms_data:
-            try:
-                from .pdf_service import build_application_pdf
-                pdf_binary = build_application_pdf(first_form)
-                response = HttpResponse(pdf_binary, content_type="application/pdf")
-                response["Content-Disposition"] = f'attachment; filename="{pdf_filename}"'
-                response["Content-Length"] = len(pdf_binary)
-                return response
-            except Exception as pdf_err:
-                logger.error(f"Error building native binary PDF: {pdf_err}", exc_info=True)
-                # Fallback to HTML if PDF assembly fails
-                pass
-
-        # Print / Preview mode: serve printable HTML
+        # Serve directly over HTTP(S) so the page URL remains https://.../api/admin/applications/...
+        # and automatically downloads the real .pdf file (Admission_And_Quiz_SF-XXXX_StudentName.pdf)!
         response = HttpResponse(html_content, content_type="text/html; charset=utf-8")
         return response
 
