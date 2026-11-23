@@ -2946,9 +2946,11 @@ def generate_professional_school_admission_form_html(forms_list):
     """
     Renders an authentic, high-end, professional School Admission Physical Form & Quiz Result Document (A4 printable / PDF).
     Features:
-    - Top Floating Action Bar (Print / Save as PDF & Download HTML Document buttons - hidden on print)
-    - Page 1: Complete Admission Application Details (Student, Milestones, Health, Parents/Guardian, Siblings, Present School, Vikas Kendra Activities, Uploaded Documents Checklist, Part X & Y Assessment Scorecard, Declaration & Signatures)
-    - Page 2: Complete Parental Understanding & Partnership Questionnaire (Quiz Result Summary, 10 MCQs with Selected Option & Marks, 4 Written Responses with AI/Educator Evaluation & Feedback)
+    - Official Shreyas Foundation Spiral Logo in header
+    - Top Floating Action Bar (Print / Save as PDF - hidden on print)
+    - Page 1: Complete Admission Application Details
+    - Page 2: Complete Parental Understanding & Partnership Questionnaire (Quiz Result)
+    - Page 3+: Each Uploaded Document on its own dedicated A4 page
     """
     import html as html_lib
 
@@ -2956,6 +2958,9 @@ def generate_professional_school_admission_form_html(forms_list):
         if val is None or str(val).strip() == "":
             return default
         return html_lib.escape(str(val))
+
+    shreyas_logo_url = _sign_azure_blob_url_if_needed("https://shreyasfoundation.blob.core.windows.net/media/shreyas_logo.png")
+    logo_img_html = f'<img src="{shreyas_logo_url}" alt="Shreyas Foundation Logo" class="school-logo-img" />'
 
     cards_html = ""
     for idx, item in enumerate(forms_list):
@@ -3059,7 +3064,7 @@ def generate_professional_school_admission_form_html(forms_list):
         vk2_acts = ", ".join(str(x) for x in (vk_info.get("vk2") or [])) or "-"
         vk3_acts = ", ".join(str(x) for x in (vk_info.get("vk3") or [])) or "-"
 
-        # Uploaded Documents Badges & Embedded Annexures
+        # Uploaded Documents — Each document rendered directly on its own dedicated A4 page (Removed from Form Page 1)
         doc_items_list = [
             ("Child Passport Photograph", docs_info.get("photograph_child")),
             ("Birth Certificate", docs_info.get("birth_certificate")),
@@ -3071,81 +3076,61 @@ def generate_professional_school_admission_form_html(forms_list):
             ("Previous Year's Report Card", docs_info.get("previous_report_card")),
             ("Alak Malak Certificate", docs_info.get("alak_malak_certificate")),
         ]
-        doc_badges = []
         uploaded_annexures = []
         for doc_label, raw_doc_url in doc_items_list:
             doc_url = _sign_azure_blob_url_if_needed(raw_doc_url)
             if doc_url:
-                doc_badges.append(f'<a href="{esc(doc_url)}" target="_blank" class="doc-pill doc-ok">&#10004; {esc(doc_label)}</a>')
                 uploaded_annexures.append((doc_label, doc_url))
-            else:
-                doc_badges.append(f'<span class="doc-pill doc-missing">&#10008; {esc(doc_label)}</span>')
-        docs_html = " ".join(doc_badges)
 
-        total_pages_for_student = 3 if uploaded_annexures else 2
+        total_pages_for_student = 2 + len(uploaded_annexures)
 
-        # Build Page 3: Embedded Documents & Certificates Annexures
+        # Build Dedicated Full-Page A4 Sheets for Each Uploaded Document
         annexures_page_html = ""
-        if uploaded_annexures:
-            annexure_cards_html = ""
-            for ann_idx, (ann_label, ann_url) in enumerate(uploaded_annexures, start=1):
-                clean_path_lower = ann_url.split("?")[0].lower()
-                is_pdf = clean_path_lower.endswith(".pdf")
-                is_word = clean_path_lower.endswith(".doc") or clean_path_lower.endswith(".docx")
+        for ann_idx, (ann_label, ann_url) in enumerate(uploaded_annexures, start=1):
+            current_page_num = 2 + ann_idx
+            clean_path_lower = ann_url.split("?")[0].lower()
+            is_pdf = clean_path_lower.endswith(".pdf")
+            is_word = clean_path_lower.endswith(".doc") or clean_path_lower.endswith(".docx")
 
-                if is_pdf:
-                    preview_html = f"""
-                    <iframe src="{esc(ann_url)}" class="annexure-pdf-frame" title="{esc(ann_label)}"></iframe>
-                    <div class="annexure-fallback">PDF Document Attached — <a href="{esc(ann_url)}" target="_blank">Click here to open full PDF ({esc(ann_label)})</a></div>
-                    """
-                elif is_word:
-                    preview_html = f"""
-                    <div class="annexure-doc-box">
-                        <div style="font-size: 26px; margin-bottom: 4px;">📄</div>
-                        <div><strong>{esc(ann_label)} (Word Document)</strong></div>
-                        <div style="margin-top: 4px;"><a href="{esc(ann_url)}" target="_blank" class="doc-pill doc-ok">Download / View Document</a></div>
-                    </div>
-                    """
-                else:
-                    preview_html = f"""
-                    <div class="annexure-img-wrapper">
-                        <img src="{esc(ann_url)}" alt="{esc(ann_label)}" class="annexure-img" />
-                    </div>
-                    """
-
-                annexure_cards_html += f"""
-                <div class="annexure-card">
-                    <div class="annexure-card-header">
-                        <span><strong>Annexure #{ann_idx}: {esc(ann_label)}</strong></span>
-                        <a href="{esc(ann_url)}" target="_blank" class="annexure-open-link no-print">Open Original ↗</a>
-                    </div>
-                    <div class="annexure-card-body">
-                        {preview_html}
-                    </div>
+            if is_pdf:
+                preview_html = f"""
+                <embed src="{esc(ann_url)}#toolbar=0&navpanes=0&scrollbar=0" type="application/pdf" class="full-doc-pdf-frame" />
+                """
+            elif is_word:
+                preview_html = f"""
+                <div class="annexure-doc-box">
+                    <div style="font-size: 36px; margin-bottom: 8px;">📄</div>
+                    <div style="font-size: 14px;"><strong>{esc(ann_label)}</strong></div>
+                </div>
+                """
+            else:
+                preview_html = f"""
+                <div class="full-doc-img-wrapper">
+                    <img src="{esc(ann_url)}" alt="{esc(ann_label)}" class="full-doc-img" />
                 </div>
                 """
 
-            annexures_page_html = f"""
-        <!-- PAGE 3: UPLOADED DOCUMENTS & CERTIFICATES ANNEXURES -->
+            annexures_page_html += f"""
+        <!-- DEDICATED DOCUMENT PAGE {current_page_num}: {esc(ann_label)} -->
         <div class="admission-sheet page-break">
-            <div class="header-container" style="padding-bottom: 6px; margin-bottom: 6px;">
+            <div class="header-container" style="padding-bottom: 6px; margin-bottom: 8px;">
                 <div class="logo-area">
-                    <div class="school-logo">🌿</div>
+                    {logo_img_html}
                 </div>
                 <div class="header-text">
-                    <h1 class="trust-title">SHREYAS FOUNDATION — UPLOADED DOCUMENTS &amp; CERTIFICATES</h1>
-                    <p class="school-subtitle">Student: <strong>{esc(sp.get('first_name'))} {esc(sp.get('surname'))}</strong> | App No: <strong>{esc(fd.get('application_number'))}</strong> | Submission ID: <strong>#{esc(fd.get('submission_id'))}</strong> | Total Attached Documents: <strong>{len(uploaded_annexures)}</strong></p>
+                    <h1 class="trust-title">SHREYAS FOUNDATION — ATTACHED DOCUMENT ({ann_idx} OF {len(uploaded_annexures)})</h1>
+                    <h2 class="school-title" style="font-size: 15px; margin-top: 2px;">{esc(ann_label).upper()}</h2>
+                    <p class="school-subtitle">Student: <strong>{esc(sp.get('first_name'))} {esc(sp.get('surname'))}</strong> | App No: <strong>{esc(fd.get('application_number'))}</strong> | Submission ID: <strong>#{esc(fd.get('submission_id'))}</strong> | Standard: <strong>{esc(fd.get('standard'))} ({esc(fd.get('medium'))})</strong></p>
                 </div>
             </div>
 
-            <div class="section-title">ATTACHED CERTIFICATES, AADHAR CARDS &amp; VERIFICATION DOCUMENTS</div>
-            <div class="annexures-grid">
-                {annexure_cards_html}
+            <div class="full-doc-container">
+                {preview_html}
             </div>
 
             <div class="form-footer">
-                <div>Application No: {esc(fd.get('application_number'))} | Student: {esc(sp.get('first_name'))} {esc(sp.get('surname'))}</div>
-                <div>Page 3 of {total_pages_for_student} (Uploaded Documents &amp; Certificates Annexures)</div>
+                <div>Document: {esc(ann_label)} | Application No: {esc(fd.get('application_number'))}</div>
+                <div>Page {current_page_num} of {total_pages_for_student} (Attached Verification Document)</div>
             </div>
         </div>
             """
@@ -3200,7 +3185,7 @@ def generate_professional_school_admission_form_html(forms_list):
             <!-- Header Section -->
             <div class="header-container">
                 <div class="logo-area">
-                    <div class="school-logo">🌿</div>
+                    {logo_img_html}
                 </div>
                 <div class="header-text">
                     <h1 class="trust-title">{esc(sh.get('trust_name', 'Shreyas Foundation')).upper()}</h1>
@@ -3343,10 +3328,6 @@ def generate_professional_school_admission_form_html(forms_list):
                     <td class="lbl">Vikas Kendra 3 Activities:</td>
                     <td class="val">{esc(vk3_acts)}</td>
                 </tr>
-                <tr>
-                    <td class="lbl">Uploaded Documents:</td>
-                    <td colspan="3" class="val">{docs_html}</td>
-                </tr>
             </table>
 
             <!-- Section 4: Assessment Summary -->
@@ -3432,7 +3413,7 @@ def generate_professional_school_admission_form_html(forms_list):
         <div class="admission-sheet page-break">
             <div class="header-container" style="padding-bottom: 6px; margin-bottom: 6px;">
                 <div class="logo-area">
-                    <div class="school-logo">🌿</div>
+                    {logo_img_html}
                 </div>
                 <div class="header-text">
                     <h1 class="trust-title">SHREYAS FOUNDATION — PARENTAL QUESTIONNAIRE &amp; QUIZ RESULT</h1>
@@ -3579,12 +3560,26 @@ def generate_professional_school_admission_form_html(forms_list):
             margin-bottom: 6px;
         }}
         .logo-area {{
-            width: 55px;
+            width: 62px;
             text-align: center;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }}
-        .school-logo {{
-            font-size: 36px;
-            line-height: 1;
+        .school-logo-img {{
+            width: 54px;
+            height: 54px;
+            object-fit: contain;
+        }}
+        .top-bar-logo {{
+            width: 26px;
+            height: 26px;
+            object-fit: contain;
+            vertical-align: middle;
+            margin-right: 6px;
+            background: #ffffff;
+            border-radius: 50%;
+            padding: 2px;
         }}
         .header-text {{
             flex: 1;
@@ -3862,73 +3857,38 @@ def generate_professional_school_admission_form_html(forms_list):
             padding-top: 3px;
             margin-top: 8px;
         }}
-        .annexures-grid {{
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 10px;
-            margin-top: 8px;
-        }}
-        .annexure-card {{
+        .full-doc-container {{
+            width: 100%;
+            height: 235mm;
             border: 1px solid #cbd5e1;
             border-radius: 4px;
-            background: #ffffff;
-            overflow: hidden;
-            page-break-inside: avoid;
-            break-inside: avoid;
-        }}
-        .annexure-card-header {{
-            background: #f1f5f9;
-            color: #0f3d2e;
-            font-size: 9px;
-            padding: 4px 8px;
-            border-bottom: 1px solid #cbd5e1;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }}
-        .annexure-open-link {{
-            font-size: 8px;
-            color: #8b1e28;
-            font-weight: 700;
-            text-decoration: none;
-        }}
-        .annexure-card-body {{
-            padding: 6px;
-            text-align: center;
             background: #fafaf9;
-            min-height: 180px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-        }}
-        .annexure-img-wrapper {{
-            width: 100%;
-            max-height: 240px;
             display: flex;
             align-items: center;
             justify-content: center;
+            padding: 8px;
             overflow: hidden;
         }}
-        .annexure-img {{
-            max-width: 100%;
-            max-height: 235px;
-            object-fit: contain;
-            border: 1px solid #e2e8f0;
-        }}
-        .annexure-pdf-frame {{
+        .full-doc-img-wrapper {{
             width: 100%;
-            height: 220px;
-            border: 1px solid #cbd5e1;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }}
-        .annexure-fallback {{
-            font-size: 8px;
-            color: #475569;
-            margin-top: 4px;
+        .full-doc-img {{
+            max-width: 100%;
+            max-height: 228mm;
+            object-fit: contain;
+        }}
+        .full-doc-pdf-frame {{
+            width: 100%;
+            height: 228mm;
+            border: none;
         }}
         .annexure-doc-box {{
-            padding: 16px;
-            font-size: 9px;
+            padding: 24px;
+            text-align: center;
             color: #334155;
         }}
 
@@ -3952,7 +3912,7 @@ def generate_professional_school_admission_form_html(forms_list):
 </head>
 <body>
     <div class="top-action-bar no-print">
-        <div class="bar-title">🌿 Shreyas Foundation — Official Admission Form &amp; Parental Quiz Result Document</div>
+        <div class="bar-title"><img src="{shreyas_logo_url}" alt="Logo" class="top-bar-logo" /> Shreyas Foundation — Official Admission Form &amp; Parental Quiz Result Document</div>
         <div class="bar-actions">
             <button class="action-btn primary" onclick="window.print()">🖨️ Print / Save as PDF</button>
         </div>
@@ -3994,43 +3954,96 @@ class AdminPrintPhysicalFormView(APIView):
         if denied:
             return denied
 
-        target_id = (
-            application_id
-            or request.query_params.get("application_id")
-            or request.query_params.get("id")
-            or request.query_params.get("application_number")
-        )
+        is_bulk_print = "print-bulk" in request.path.lower()
         submission_id_param = request.query_params.get("submission_id")
+        app_id_param = request.query_params.get("application_id") or request.query_params.get("id")
+        app_no_param = request.query_params.get("application_number")
 
-        if target_id:
-            if str(target_id).isdigit():
-                applications = AdmissionApplication.objects.select_related('evaluator', 'submission').filter(
-                    Q(id=int(target_id)) | Q(application_number=str(target_id)) | Q(submission_id=int(target_id))
-                )
-            else:
-                applications = AdmissionApplication.objects.select_related('evaluator', 'submission').filter(
-                    application_number__iexact=str(target_id).strip()
-                )
-
-            if not applications.exists():
-                return Response({
-                    "status": "error",
-                    "message": f"Admission application '{target_id}' not found."
-                }, status=status.HTTP_404_NOT_FOUND)
-        elif submission_id_param:
+        # STRICT SINGLE-RECORD MATCHING:
+        # 1. If ?submission_id=<id> is explicitly provided, ONLY match that exact submission_id
+        if submission_id_param:
             if str(submission_id_param).isdigit():
-                applications = AdmissionApplication.objects.select_related('evaluator', 'submission').filter(
+                app_obj = AdmissionApplication.objects.select_related('evaluator', 'submission').filter(
                     submission_id=int(submission_id_param)
-                )
+                ).first()
             else:
-                applications = AdmissionApplication.objects.none()
+                app_obj = None
 
-            if not applications.exists():
+            if not app_obj:
                 return Response({
                     "status": "error",
                     "message": f"Admission application for submission_id '{submission_id_param}' not found."
                 }, status=status.HTTP_404_NOT_FOUND)
-        else:
+            applications = [app_obj]
+
+        # 2. If ?application_id=<id> or ?id=<id> is explicitly provided, ONLY match that exact application id
+        elif app_id_param and not application_id:
+            if str(app_id_param).isdigit():
+                app_obj = AdmissionApplication.objects.select_related('evaluator', 'submission').filter(
+                    id=int(app_id_param)
+                ).first()
+            else:
+                app_obj = AdmissionApplication.objects.select_related('evaluator', 'submission').filter(
+                    application_number__iexact=str(app_id_param).strip()
+                ).first()
+
+            if not app_obj:
+                return Response({
+                    "status": "error",
+                    "message": f"Admission application '{app_id_param}' not found."
+                }, status=status.HTTP_404_NOT_FOUND)
+            applications = [app_obj]
+
+        # 3. If ?application_number=<app_no> is explicitly provided, ONLY match that exact application_number
+        elif app_no_param and not application_id:
+            app_obj = AdmissionApplication.objects.select_related('evaluator', 'submission').filter(
+                application_number__iexact=str(app_no_param).strip()
+            ).first()
+            if not app_obj:
+                return Response({
+                    "status": "error",
+                    "message": f"Admission application '{app_no_param}' not found."
+                }, status=status.HTTP_404_NOT_FOUND)
+            applications = [app_obj]
+
+        # 4. If URL path <application_id> is provided (/api/admin/applications/<application_id>/print/ or /download/)
+        #    Strictly return ONLY 1 record! (Prioritize exact submission_id or exact id depending on ?by= param, or exact id first then submission_id)
+        elif application_id:
+            lookup_by = (request.query_params.get("by") or "").lower().strip()
+            app_obj = None
+            if str(application_id).isdigit():
+                num_id = int(application_id)
+                if lookup_by == "submission_id":
+                    app_obj = AdmissionApplication.objects.select_related('evaluator', 'submission').filter(
+                        submission_id=num_id
+                    ).first()
+                elif lookup_by == "application_id":
+                    app_obj = AdmissionApplication.objects.select_related('evaluator', 'submission').filter(
+                        id=num_id
+                    ).first()
+                else:
+                    # Check exact AdmissionApplication.id first; if not found, fallback to exact submission_id
+                    app_obj = AdmissionApplication.objects.select_related('evaluator', 'submission').filter(
+                        id=num_id
+                    ).first()
+                    if not app_obj:
+                        app_obj = AdmissionApplication.objects.select_related('evaluator', 'submission').filter(
+                            submission_id=num_id
+                        ).first()
+            else:
+                app_obj = AdmissionApplication.objects.select_related('evaluator', 'submission').filter(
+                    application_number__iexact=str(application_id).strip()
+                ).first()
+
+            if not app_obj:
+                return Response({
+                    "status": "error",
+                    "message": f"Admission application '{application_id}' not found."
+                }, status=status.HTTP_404_NOT_FOUND)
+            applications = [app_obj]
+
+        # 5. Bulk print is ONLY allowed on the dedicated /print-bulk/ endpoint
+        elif is_bulk_print:
             standard = request.query_params.get("standard")
             medium = request.query_params.get("medium")
             app_status = request.query_params.get("status", "SELECTED")
@@ -4042,7 +4055,12 @@ class AdminPrintPhysicalFormView(APIView):
                 applications = applications.filter(medium__iexact=medium)
             if app_status and app_status.lower() != "all":
                 applications = applications.filter(admission_status__iexact=app_status)
-            applications = applications.order_by('merit_rank', 'application_number')
+            applications = list(applications.order_by('merit_rank', 'application_number'))
+        else:
+            return Response({
+                "status": "error",
+                "message": "Please provide 'submission_id', 'application_id', or 'application_number' to download a single student's document."
+            }, status=status.HTTP_400_BAD_REQUEST)
 
         from .evaluation_service import calculate_part_x_score
 

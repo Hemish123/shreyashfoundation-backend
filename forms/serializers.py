@@ -51,12 +51,12 @@ class QuizSubmissionListSerializer(serializers.ModelSerializer):
 
     def get_print_document_url(self, obj):
         if hasattr(obj, 'admission_application') and obj.admission_application:
-            return f"/api/admin/applications/{obj.admission_application.id}/print/"
+            return f"/api/admin/applications/download/?submission_id={obj.id}"
         return None
 
     def get_download_document_url(self, obj):
         if hasattr(obj, 'admission_application') and obj.admission_application:
-            return f"/api/admin/applications/{obj.admission_application.id}/download/"
+            return f"/api/admin/applications/download/?submission_id={obj.id}&download=1"
         return None
 
     def get_ai_evaluations(self, obj):
@@ -326,10 +326,10 @@ class AdmissionApplicationSerializer(serializers.ModelSerializer):
         read_only_fields = ('application_number', 'created_at')
 
     def get_print_document_url(self, obj):
-        return f"/api/admin/applications/{obj.id}/print/"
+        return f"/api/admin/applications/{obj.application_number}/print/"
 
     def get_download_document_url(self, obj):
-        return f"/api/admin/applications/{obj.id}/download/"
+        return f"/api/admin/applications/{obj.application_number}/download/"
 
     def get_quiz_answers(self, obj):
         """Returns the parent's submitted answers dictionary { '1': 'B', ..., '11': '...' }"""

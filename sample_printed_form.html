@@ -86,12 +86,26 @@
             margin-bottom: 6px;
         }
         .logo-area {
-            width: 55px;
+            width: 62px;
             text-align: center;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
-        .school-logo {
-            font-size: 36px;
-            line-height: 1;
+        .school-logo-img {
+            width: 54px;
+            height: 54px;
+            object-fit: contain;
+        }
+        .top-bar-logo {
+            width: 26px;
+            height: 26px;
+            object-fit: contain;
+            vertical-align: middle;
+            margin-right: 6px;
+            background: #ffffff;
+            border-radius: 50%;
+            padding: 2px;
         }
         .header-text {
             flex: 1;
@@ -369,73 +383,38 @@
             padding-top: 3px;
             margin-top: 8px;
         }
-        .annexures-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 10px;
-            margin-top: 8px;
-        }
-        .annexure-card {
+        .full-doc-container {
+            width: 100%;
+            height: 235mm;
             border: 1px solid #cbd5e1;
             border-radius: 4px;
-            background: #ffffff;
-            overflow: hidden;
-            page-break-inside: avoid;
-            break-inside: avoid;
-        }
-        .annexure-card-header {
-            background: #f1f5f9;
-            color: #0f3d2e;
-            font-size: 9px;
-            padding: 4px 8px;
-            border-bottom: 1px solid #cbd5e1;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        .annexure-open-link {
-            font-size: 8px;
-            color: #8b1e28;
-            font-weight: 700;
-            text-decoration: none;
-        }
-        .annexure-card-body {
-            padding: 6px;
-            text-align: center;
             background: #fafaf9;
-            min-height: 180px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-        }
-        .annexure-img-wrapper {
-            width: 100%;
-            max-height: 240px;
             display: flex;
             align-items: center;
             justify-content: center;
+            padding: 8px;
             overflow: hidden;
         }
-        .annexure-img {
-            max-width: 100%;
-            max-height: 235px;
-            object-fit: contain;
-            border: 1px solid #e2e8f0;
-        }
-        .annexure-pdf-frame {
+        .full-doc-img-wrapper {
             width: 100%;
-            height: 220px;
-            border: 1px solid #cbd5e1;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
-        .annexure-fallback {
-            font-size: 8px;
-            color: #475569;
-            margin-top: 4px;
+        .full-doc-img {
+            max-width: 100%;
+            max-height: 228mm;
+            object-fit: contain;
+        }
+        .full-doc-pdf-frame {
+            width: 100%;
+            height: 228mm;
+            border: none;
         }
         .annexure-doc-box {
-            padding: 16px;
-            font-size: 9px;
+            padding: 24px;
+            text-align: center;
             color: #334155;
         }
 
@@ -459,7 +438,7 @@
 </head>
 <body>
     <div class="top-action-bar no-print">
-        <div class="bar-title">🌿 Shreyas Foundation — Official Admission Form &amp; Parental Quiz Result Document</div>
+        <div class="bar-title"><img src="https://shreyasfoundation.blob.core.windows.net/media/shreyas_logo.png?se=2026-11-23T11%3A09%3A46Z&sp=r&sv=2026-10-06&sr=b&sig=ehoL0pbh2TrK7dSt%2BEBbWPvmRBwrioGCW/x/VgoXz9A%3D" alt="Logo" class="top-bar-logo" /> Shreyas Foundation — Official Admission Form &amp; Parental Quiz Result Document</div>
         <div class="bar-actions">
             <button class="action-btn primary" onclick="window.print()">🖨️ Print / Save as PDF</button>
         </div>
@@ -470,7 +449,7 @@
             <!-- Header Section -->
             <div class="header-container">
                 <div class="logo-area">
-                    <div class="school-logo">🌿</div>
+                    <img src="https://shreyasfoundation.blob.core.windows.net/media/shreyas_logo.png?se=2026-11-23T11%3A09%3A46Z&sp=r&sv=2026-10-06&sr=b&sig=ehoL0pbh2TrK7dSt%2BEBbWPvmRBwrioGCW/x/VgoXz9A%3D" alt="Shreyas Foundation Logo" class="school-logo-img" />
                 </div>
                 <div class="header-text">
                     <h1 class="trust-title">SHREYAS FOUNDATION</h1>
@@ -613,10 +592,6 @@
                     <td class="lbl">Vikas Kendra 3 Activities:</td>
                     <td class="val">Science Club</td>
                 </tr>
-                <tr>
-                    <td class="lbl">Uploaded Documents:</td>
-                    <td colspan="3" class="val"><a href="https://example.com/photo.jpg" target="_blank" class="doc-pill doc-ok">&#10004; Child Passport Photograph</a> <a href="https://example.com/bc.jpg" target="_blank" class="doc-pill doc-ok">&#10004; Birth Certificate</a> <a href="https://example.com/ca.jpg" target="_blank" class="doc-pill doc-ok">&#10004; Child&#x27;s Aadhar Card</a> <a href="https://example.com/pa.jpg" target="_blank" class="doc-pill doc-ok">&#10004; Parent&#x27;s / Guardian&#x27;s Aadhar Card</a> <a href="https://example.com/hc.pdf" target="_blank" class="doc-pill doc-ok">&#10004; Doctor&#x27;s Health Certificate</a> <span class="doc-pill doc-missing">&#10008; Eye Checkup Certificate</span> <span class="doc-pill doc-missing">&#10008; Caste Certificate</span> <span class="doc-pill doc-missing">&#10008; Previous Year&#x27;s Report Card</span> <span class="doc-pill doc-missing">&#10008; Alak Malak Certificate</span></td>
-                </tr>
             </table>
 
             <!-- Section 4: Assessment Summary -->
@@ -694,7 +669,7 @@
             <!-- Footer -->
             <div class="form-footer">
                 <div>Document Generated On: 23-11-2026 | Application No: SF-TEST001</div>
-                <div>Page 1 of 3 (Admission Application Form)</div>
+                <div>Page 1 of 7 (Admission Application Form)</div>
             </div>
         </div>
 
@@ -702,7 +677,7 @@
         <div class="admission-sheet page-break">
             <div class="header-container" style="padding-bottom: 6px; margin-bottom: 6px;">
                 <div class="logo-area">
-                    <div class="school-logo">🌿</div>
+                    <img src="https://shreyasfoundation.blob.core.windows.net/media/shreyas_logo.png?se=2026-11-23T11%3A09%3A46Z&sp=r&sv=2026-10-06&sr=b&sig=ehoL0pbh2TrK7dSt%2BEBbWPvmRBwrioGCW/x/VgoXz9A%3D" alt="Shreyas Foundation Logo" class="school-logo-img" />
                 </div>
                 <div class="header-text">
                     <h1 class="trust-title">SHREYAS FOUNDATION — PARENTAL QUESTIONNAIRE &amp; QUIZ RESULT</h1>
@@ -785,99 +760,140 @@
 
             <div class="form-footer">
                 <div>Quiz Completed At: 23-11-2026 11:30 | Parent WhatsApp: 9876543210</div>
-                <div>Page 2 of 3 (Parental Quiz Result &amp; Evaluation Report)</div>
+                <div>Page 2 of 7 (Parental Quiz Result &amp; Evaluation Report)</div>
             </div>
         </div>
         
-        <!-- PAGE 3: UPLOADED DOCUMENTS & CERTIFICATES ANNEXURES -->
+        <!-- DEDICATED DOCUMENT PAGE 3: Child Passport Photograph -->
         <div class="admission-sheet page-break">
-            <div class="header-container" style="padding-bottom: 6px; margin-bottom: 6px;">
+            <div class="header-container" style="padding-bottom: 6px; margin-bottom: 8px;">
                 <div class="logo-area">
-                    <div class="school-logo">🌿</div>
+                    <img src="https://shreyasfoundation.blob.core.windows.net/media/shreyas_logo.png?se=2026-11-23T11%3A09%3A46Z&sp=r&sv=2026-10-06&sr=b&sig=ehoL0pbh2TrK7dSt%2BEBbWPvmRBwrioGCW/x/VgoXz9A%3D" alt="Shreyas Foundation Logo" class="school-logo-img" />
                 </div>
                 <div class="header-text">
-                    <h1 class="trust-title">SHREYAS FOUNDATION — UPLOADED DOCUMENTS &amp; CERTIFICATES</h1>
-                    <p class="school-subtitle">Student: <strong>Aarav Patel</strong> | App No: <strong>SF-TEST001</strong> | Submission ID: <strong>#101</strong> | Total Attached Documents: <strong>5</strong></p>
+                    <h1 class="trust-title">SHREYAS FOUNDATION — ATTACHED DOCUMENT (1 OF 5)</h1>
+                    <h2 class="school-title" style="font-size: 15px; margin-top: 2px;">CHILD PASSPORT PHOTOGRAPH</h2>
+                    <p class="school-subtitle">Student: <strong>Aarav Patel</strong> | App No: <strong>SF-TEST001</strong> | Submission ID: <strong>#101</strong> | Standard: <strong>1 (Gujarati)</strong></p>
                 </div>
             </div>
 
-            <div class="section-title">ATTACHED CERTIFICATES, AADHAR CARDS &amp; VERIFICATION DOCUMENTS</div>
-            <div class="annexures-grid">
+            <div class="full-doc-container">
                 
-                <div class="annexure-card">
-                    <div class="annexure-card-header">
-                        <span><strong>Annexure #1: Child Passport Photograph</strong></span>
-                        <a href="https://example.com/photo.jpg" target="_blank" class="annexure-open-link no-print">Open Original ↗</a>
-                    </div>
-                    <div class="annexure-card-body">
-                        
-                    <div class="annexure-img-wrapper">
-                        <img src="https://example.com/photo.jpg" alt="Child Passport Photograph" class="annexure-img" />
-                    </div>
-                    
-                    </div>
-                </div>
-                
-                <div class="annexure-card">
-                    <div class="annexure-card-header">
-                        <span><strong>Annexure #2: Birth Certificate</strong></span>
-                        <a href="https://example.com/bc.jpg" target="_blank" class="annexure-open-link no-print">Open Original ↗</a>
-                    </div>
-                    <div class="annexure-card-body">
-                        
-                    <div class="annexure-img-wrapper">
-                        <img src="https://example.com/bc.jpg" alt="Birth Certificate" class="annexure-img" />
-                    </div>
-                    
-                    </div>
-                </div>
-                
-                <div class="annexure-card">
-                    <div class="annexure-card-header">
-                        <span><strong>Annexure #3: Child&#x27;s Aadhar Card</strong></span>
-                        <a href="https://example.com/ca.jpg" target="_blank" class="annexure-open-link no-print">Open Original ↗</a>
-                    </div>
-                    <div class="annexure-card-body">
-                        
-                    <div class="annexure-img-wrapper">
-                        <img src="https://example.com/ca.jpg" alt="Child&#x27;s Aadhar Card" class="annexure-img" />
-                    </div>
-                    
-                    </div>
-                </div>
-                
-                <div class="annexure-card">
-                    <div class="annexure-card-header">
-                        <span><strong>Annexure #4: Parent&#x27;s / Guardian&#x27;s Aadhar Card</strong></span>
-                        <a href="https://example.com/pa.jpg" target="_blank" class="annexure-open-link no-print">Open Original ↗</a>
-                    </div>
-                    <div class="annexure-card-body">
-                        
-                    <div class="annexure-img-wrapper">
-                        <img src="https://example.com/pa.jpg" alt="Parent&#x27;s / Guardian&#x27;s Aadhar Card" class="annexure-img" />
-                    </div>
-                    
-                    </div>
-                </div>
-                
-                <div class="annexure-card">
-                    <div class="annexure-card-header">
-                        <span><strong>Annexure #5: Doctor&#x27;s Health Certificate</strong></span>
-                        <a href="https://example.com/hc.pdf" target="_blank" class="annexure-open-link no-print">Open Original ↗</a>
-                    </div>
-                    <div class="annexure-card-body">
-                        
-                    <iframe src="https://example.com/hc.pdf" class="annexure-pdf-frame" title="Doctor&#x27;s Health Certificate"></iframe>
-                    <div class="annexure-fallback">PDF Document Attached — <a href="https://example.com/hc.pdf" target="_blank">Click here to open full PDF (Doctor&#x27;s Health Certificate)</a></div>
-                    
-                    </div>
+                <div class="full-doc-img-wrapper">
+                    <img src="https://example.com/photo.jpg" alt="Child Passport Photograph" class="full-doc-img" />
                 </div>
                 
             </div>
 
             <div class="form-footer">
-                <div>Application No: SF-TEST001 | Student: Aarav Patel</div>
-                <div>Page 3 of 3 (Uploaded Documents &amp; Certificates Annexures)</div>
+                <div>Document: Child Passport Photograph | Application No: SF-TEST001</div>
+                <div>Page 3 of 7 (Attached Verification Document)</div>
+            </div>
+        </div>
+            
+        <!-- DEDICATED DOCUMENT PAGE 4: Birth Certificate -->
+        <div class="admission-sheet page-break">
+            <div class="header-container" style="padding-bottom: 6px; margin-bottom: 8px;">
+                <div class="logo-area">
+                    <img src="https://shreyasfoundation.blob.core.windows.net/media/shreyas_logo.png?se=2026-11-23T11%3A09%3A46Z&sp=r&sv=2026-10-06&sr=b&sig=ehoL0pbh2TrK7dSt%2BEBbWPvmRBwrioGCW/x/VgoXz9A%3D" alt="Shreyas Foundation Logo" class="school-logo-img" />
+                </div>
+                <div class="header-text">
+                    <h1 class="trust-title">SHREYAS FOUNDATION — ATTACHED DOCUMENT (2 OF 5)</h1>
+                    <h2 class="school-title" style="font-size: 15px; margin-top: 2px;">BIRTH CERTIFICATE</h2>
+                    <p class="school-subtitle">Student: <strong>Aarav Patel</strong> | App No: <strong>SF-TEST001</strong> | Submission ID: <strong>#101</strong> | Standard: <strong>1 (Gujarati)</strong></p>
+                </div>
+            </div>
+
+            <div class="full-doc-container">
+                
+                <div class="full-doc-img-wrapper">
+                    <img src="https://example.com/bc.jpg" alt="Birth Certificate" class="full-doc-img" />
+                </div>
+                
+            </div>
+
+            <div class="form-footer">
+                <div>Document: Birth Certificate | Application No: SF-TEST001</div>
+                <div>Page 4 of 7 (Attached Verification Document)</div>
+            </div>
+        </div>
+            
+        <!-- DEDICATED DOCUMENT PAGE 5: Child&#x27;s Aadhar Card -->
+        <div class="admission-sheet page-break">
+            <div class="header-container" style="padding-bottom: 6px; margin-bottom: 8px;">
+                <div class="logo-area">
+                    <img src="https://shreyasfoundation.blob.core.windows.net/media/shreyas_logo.png?se=2026-11-23T11%3A09%3A46Z&sp=r&sv=2026-10-06&sr=b&sig=ehoL0pbh2TrK7dSt%2BEBbWPvmRBwrioGCW/x/VgoXz9A%3D" alt="Shreyas Foundation Logo" class="school-logo-img" />
+                </div>
+                <div class="header-text">
+                    <h1 class="trust-title">SHREYAS FOUNDATION — ATTACHED DOCUMENT (3 OF 5)</h1>
+                    <h2 class="school-title" style="font-size: 15px; margin-top: 2px;">CHILD&#X27;S AADHAR CARD</h2>
+                    <p class="school-subtitle">Student: <strong>Aarav Patel</strong> | App No: <strong>SF-TEST001</strong> | Submission ID: <strong>#101</strong> | Standard: <strong>1 (Gujarati)</strong></p>
+                </div>
+            </div>
+
+            <div class="full-doc-container">
+                
+                <div class="full-doc-img-wrapper">
+                    <img src="https://example.com/ca.jpg" alt="Child&#x27;s Aadhar Card" class="full-doc-img" />
+                </div>
+                
+            </div>
+
+            <div class="form-footer">
+                <div>Document: Child&#x27;s Aadhar Card | Application No: SF-TEST001</div>
+                <div>Page 5 of 7 (Attached Verification Document)</div>
+            </div>
+        </div>
+            
+        <!-- DEDICATED DOCUMENT PAGE 6: Parent&#x27;s / Guardian&#x27;s Aadhar Card -->
+        <div class="admission-sheet page-break">
+            <div class="header-container" style="padding-bottom: 6px; margin-bottom: 8px;">
+                <div class="logo-area">
+                    <img src="https://shreyasfoundation.blob.core.windows.net/media/shreyas_logo.png?se=2026-11-23T11%3A09%3A46Z&sp=r&sv=2026-10-06&sr=b&sig=ehoL0pbh2TrK7dSt%2BEBbWPvmRBwrioGCW/x/VgoXz9A%3D" alt="Shreyas Foundation Logo" class="school-logo-img" />
+                </div>
+                <div class="header-text">
+                    <h1 class="trust-title">SHREYAS FOUNDATION — ATTACHED DOCUMENT (4 OF 5)</h1>
+                    <h2 class="school-title" style="font-size: 15px; margin-top: 2px;">PARENT&#X27;S / GUARDIAN&#X27;S AADHAR CARD</h2>
+                    <p class="school-subtitle">Student: <strong>Aarav Patel</strong> | App No: <strong>SF-TEST001</strong> | Submission ID: <strong>#101</strong> | Standard: <strong>1 (Gujarati)</strong></p>
+                </div>
+            </div>
+
+            <div class="full-doc-container">
+                
+                <div class="full-doc-img-wrapper">
+                    <img src="https://example.com/pa.jpg" alt="Parent&#x27;s / Guardian&#x27;s Aadhar Card" class="full-doc-img" />
+                </div>
+                
+            </div>
+
+            <div class="form-footer">
+                <div>Document: Parent&#x27;s / Guardian&#x27;s Aadhar Card | Application No: SF-TEST001</div>
+                <div>Page 6 of 7 (Attached Verification Document)</div>
+            </div>
+        </div>
+            
+        <!-- DEDICATED DOCUMENT PAGE 7: Doctor&#x27;s Health Certificate -->
+        <div class="admission-sheet page-break">
+            <div class="header-container" style="padding-bottom: 6px; margin-bottom: 8px;">
+                <div class="logo-area">
+                    <img src="https://shreyasfoundation.blob.core.windows.net/media/shreyas_logo.png?se=2026-11-23T11%3A09%3A46Z&sp=r&sv=2026-10-06&sr=b&sig=ehoL0pbh2TrK7dSt%2BEBbWPvmRBwrioGCW/x/VgoXz9A%3D" alt="Shreyas Foundation Logo" class="school-logo-img" />
+                </div>
+                <div class="header-text">
+                    <h1 class="trust-title">SHREYAS FOUNDATION — ATTACHED DOCUMENT (5 OF 5)</h1>
+                    <h2 class="school-title" style="font-size: 15px; margin-top: 2px;">DOCTOR&#X27;S HEALTH CERTIFICATE</h2>
+                    <p class="school-subtitle">Student: <strong>Aarav Patel</strong> | App No: <strong>SF-TEST001</strong> | Submission ID: <strong>#101</strong> | Standard: <strong>1 (Gujarati)</strong></p>
+                </div>
+            </div>
+
+            <div class="full-doc-container">
+                
+                <embed src="https://example.com/hc.pdf#toolbar=0&navpanes=0&scrollbar=0" type="application/pdf" class="full-doc-pdf-frame" />
+                
+            </div>
+
+            <div class="form-footer">
+                <div>Document: Doctor&#x27;s Health Certificate | Application No: SF-TEST001</div>
+                <div>Page 7 of 7 (Attached Verification Document)</div>
             </div>
         </div>
             
