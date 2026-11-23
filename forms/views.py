@@ -3539,54 +3539,9 @@ def generate_professional_school_admission_form_html(forms_list):
         body {{
             font-family: 'Segoe UI', Calibri, Arial, sans-serif;
             margin: 0;
-            padding: 55px 10px 20px 10px;
+            padding: 15px 10px 20px 10px;
             background-color: #f1f5f9;
             color: #1e293b;
-        }}
-        .top-action-bar {{
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 46px;
-            background: #0f3d2e;
-            color: #ffffff;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 0 20px;
-            z-index: 9999;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-        }}
-        .top-action-bar .bar-title {{
-            font-size: 13px;
-            font-weight: 700;
-            letter-spacing: 0.5px;
-        }}
-        .top-action-bar .bar-actions {{
-            display: flex;
-            gap: 10px;
-        }}
-        .action-btn {{
-            background: #ffffff;
-            color: #0f3d2e;
-            border: none;
-            padding: 6px 14px;
-            border-radius: 4px;
-            font-size: 12px;
-            font-weight: 700;
-            cursor: pointer;
-            text-decoration: none;
-            display: inline-flex;
-            align-items: center;
-            gap: 5px;
-        }}
-        .action-btn.primary {{
-            background: #fef08a;
-            color: #854d0e;
-        }}
-        .action-btn:hover {{
-            opacity: 0.92;
         }}
         .admission-sheet {{
             width: 210mm;
@@ -4009,13 +3964,6 @@ def generate_professional_school_admission_form_html(forms_list):
             100% {{ transform: translateX(200%); }}
         }}
     </style>
-    <div class="top-action-bar no-print">
-        <div class="bar-title"><img src="{shreyas_logo_url}" alt="Logo" class="top-bar-logo" /> Shreyas Foundation — Official Admission Form &amp; Parental Quiz Result Document</div>
-        <div class="bar-actions">
-            <button class="action-btn primary" id="btn-download-pdf" onclick="window.downloadTruePdfFile()">📥 Download PDF</button>
-            <button class="action-btn" onclick="window.print()">🖨️ Print</button>
-        </div>
-    </div>
     <div id="pdf-generation-toast" class="no-print" style="position:fixed; bottom:20px; right:20px; background:#0f3d2e; color:#fff; padding:12px 20px; border-radius:8px; font-size:13px; font-weight:700; box-shadow:0 4px 14px rgba(0,0,0,0.25); z-index:10000; display:flex; align-items:center; gap:10px;">
         <span>⏳ Preparing &amp; downloading PDF file...</span>
     </div>
