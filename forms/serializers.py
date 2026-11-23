@@ -4,6 +4,8 @@ from .models import QuizSubmission, AdmissionApplication
 class QuizSubmissionListSerializer(serializers.ModelSerializer):
     admission_submitted = serializers.SerializerMethodField()
     application_number = serializers.SerializerMethodField()
+    print_document_url = serializers.SerializerMethodField()
+    download_document_url = serializers.SerializerMethodField()
     is_repeated_enquiry = serializers.SerializerMethodField()
     repeated_badge = serializers.SerializerMethodField()
     created_by_user = serializers.SerializerMethodField()
@@ -38,12 +40,24 @@ class QuizSubmissionListSerializer(serializers.ModelSerializer):
             'created_at',
             'admission_submitted',
             'application_number',
+            'print_document_url',
+            'download_document_url',
             'is_repeated_enquiry',
             'repeated_badge',
             'created_by',
             'created_by_user',
             'added_by'
         ]
+
+    def get_print_document_url(self, obj):
+        if hasattr(obj, 'admission_application') and obj.admission_application:
+            return f"/api/admin/applications/{obj.admission_application.id}/print/"
+        return None
+
+    def get_download_document_url(self, obj):
+        if hasattr(obj, 'admission_application') and obj.admission_application:
+            return f"/api/admin/applications/{obj.admission_application.id}/download/"
+        return None
 
     def get_ai_evaluations(self, obj):
         if obj.answers and isinstance(obj.answers, dict):
@@ -301,6 +315,8 @@ class AdmissionApplicationSerializer(serializers.ModelSerializer):
     created_by_user = serializers.SerializerMethodField()
     quiz_answers = serializers.SerializerMethodField()
     quiz_details = serializers.SerializerMethodField()
+    print_document_url = serializers.SerializerMethodField()
+    download_document_url = serializers.SerializerMethodField()
     guardians = serializers.JSONField(required=False, default=list)
     siblings = serializers.JSONField(required=False, default=list)
 
@@ -308,6 +324,12 @@ class AdmissionApplicationSerializer(serializers.ModelSerializer):
         model = AdmissionApplication
         fields = '__all__'
         read_only_fields = ('application_number', 'created_at')
+
+    def get_print_document_url(self, obj):
+        return f"/api/admin/applications/{obj.id}/print/"
+
+    def get_download_document_url(self, obj):
+        return f"/api/admin/applications/{obj.id}/download/"
 
     def get_quiz_answers(self, obj):
         """Returns the parent's submitted answers dictionary { '1': 'B', ..., '11': '...' }"""

@@ -1,7 +1,7 @@
 """
 Service for auto-allocating interaction time slots as per Shreyas Foundation Chart:
-- Scheduled Range: November 26 – December 8 (10-11 working days)
-- Capacity: 30–40 families daily
+- Scheduled Start Date: November 26, 2026 (Open-ended / no fixed end date)
+- Capacity: 40 families daily (10 per slot; up to 13 with Admin buffer)
 - 4 Slots per day (10 children per slot):
   * Slot 1: 9:00 AM TO 10:00 AM
   * Slot 2: 10:00 AM TO 11:00 AM
@@ -18,7 +18,45 @@ from .models import AdmissionApplication
 logger = logging.getLogger(__name__)
 
 INTERACTION_START_DATE = date(2026, 11, 26)
-INTERACTION_END_DATE = date(2026, 12, 8)
+INTERACTION_END_DATE = None  # Open-ended: continues automatically across working days (Mon-Sat)
+
+# Official Public / School Holidays (Gujarat / Shreyas Foundation) — skipped during slot allocation
+PUBLIC_HOLIDAYS = {
+    date(2026, 12, 25): "Christmas (નાતાલ)",
+    date(2027, 1, 14): "Makar Sankranti / Uttarayan (ઉત્તરાયણ)",
+    date(2027, 1, 15): "Vasi Uttarayan (વાસી ઉત્તરાયણ)",
+    date(2027, 1, 26): "Republic Day (પ્રજાસત્તાક દિન)",
+    date(2027, 3, 6): "Maha Shivratri (મહા શિવરાત્રી)",
+    date(2027, 3, 22): "Holi / Dhuleti (ધૂળેટી)",
+    date(2027, 4, 14): "Dr. Ambedkar Jayanti / Ram Navami",
+    date(2027, 4, 18): "Mahavir Jayanti",
+}
+
+
+def is_interaction_holiday(check_date: date) -> tuple[bool, str]:
+    """
+    Returns (True, reason) if check_date is a Sunday or a listed Public/School Holiday.
+    Also checks annual fixed-date holidays (25 Dec, 14 Jan, 26 Jan, 15 Aug, 2 Oct).
+    """
+    if check_date.weekday() == 6:
+        return True, "Sunday (રવિવાર)"
+
+    if check_date in PUBLIC_HOLIDAYS:
+        return True, PUBLIC_HOLIDAYS[check_date]
+
+    # Fixed annual calendar holidays regardless of year
+    fixed_annual = {
+        (12, 25): "Christmas (નાતાલ)",
+        (1, 14): "Makar Sankranti / Uttarayan (ઉત્તરાયણ)",
+        (1, 15): "Vasi Uttarayan (વાસી ઉત્તરાયણ)",
+        (1, 26): "Republic Day (પ્રજાસત્તાક દિન)",
+        (8, 15): "Independence Day (સ્વાતંત્ર્ય દિન)",
+        (10, 2): "Gandhi Jayanti (ગાંધી જયંતિ)",
+    }
+    if (check_date.month, check_date.day) in fixed_annual:
+        return True, fixed_annual[(check_date.month, check_date.day)]
+
+    return False, ""
 
 STANDARD_SLOT_CAPACITY = 10
 ADMIN_OVERRIDE_CAPACITY = 13  # Admin can book up to 3 extra children per slot (total 13)
@@ -33,29 +71,36 @@ SLOT_DEFINITIONS = [
 
 def allocate_next_available_interaction_slot(reference_date=None, allow_admin_buffer: bool = False) -> dict:
     """
-    Finds the earliest available interaction slot strictly in the Official Interaction Window:
-    - Scheduled Range: November 26, 2026 – December 8, 2026 (Working days Mon-Sat)
+    Finds the earliest available interaction slot starting from November 26, 2026:
+    - Starting Date: November 26, 2026 (Working days Mon-Sat, no fixed end date)
     - Default Capacity: 10 children per slot (Auto-allocation strictly caps at 10).
     - Admin buffer: Admin can manually place up to 3 extra children (up to 13 per slot).
     - Sundays are skipped automatically.
     - First-come, first-served allocation on admission form completion.
     """
     current_date = reference_date or INTERACTION_START_DATE
+    if current_date < INTERACTION_START_DATE:
+        current_date = INTERACTION_START_DATE
 
-    # Fetch all booked slot counts in a single DB query instead of 44 separate queries
+    # Fetch all booked slot counts from current_date onwards in a single DB query
     from django.db.models import Count
-    slot_rows = AdmissionApplication.objects.filter(
-        interaction_date__gte=current_date,
-        interaction_date__lte=(INTERACTION_END_DATE or date(2026, 12, 31))
+    qs = AdmissionApplication.objects.filter(
+        interaction_date__gte=current_date
     ).exclude(
         admission_status__in=['CANCELLED', 'REJECTED']
-    ).values('interaction_date', 'interaction_slot_no').annotate(total=Count('id'))
+    )
+    if INTERACTION_END_DATE:
+        qs = qs.filter(interaction_date__lte=INTERACTION_END_DATE)
+
+    slot_rows = qs.values('interaction_date', 'interaction_slot_no').annotate(total=Count('id'))
     booked_map = {(r['interaction_date'], r['interaction_slot_no']): r['total'] for r in slot_rows}
 
-    # Search through the interaction window (Nov 26 to Dec 8)
-    while current_date <= (INTERACTION_END_DATE or date(2026, 12, 31)):
-        # Skip Sundays
-        if current_date.weekday() == 6:
+    # Search forward day by day starting from Nov 26 (no fixed end date cutoff)
+    while INTERACTION_END_DATE is None or current_date <= INTERACTION_END_DATE:
+        # Skip Sundays and Official Public/School Holidays (e.g. 25 Dec, 14 Jan, 26 Jan, etc.)
+        is_holiday, holiday_name = is_interaction_holiday(current_date)
+        if is_holiday:
+            logger.debug(f"[SLOT SKIP] Skipping {current_date} ({holiday_name})")
             current_date += timedelta(days=1)
             continue
 
@@ -84,7 +129,7 @@ def allocate_next_available_interaction_slot(reference_date=None, allow_admin_bu
         # All 4 slots on current_date are full -> move to next working day
         current_date += timedelta(days=1)
 
-    raise RuntimeError("All interaction slots for November 26 – December 8 are full.")
+    raise RuntimeError("No available interaction slots found.")
 
 
 def validate_and_assign_admin_slot(application: AdmissionApplication, chosen_date: date, chosen_slot_no: int) -> dict:
@@ -99,9 +144,13 @@ def validate_and_assign_admin_slot(application: AdmissionApplication, chosen_dat
     if not slot_match:
         raise ValueError(f"Invalid slot_no {slot_no}. Must be between 1 and 4.")
 
-    # Check if Sunday
-    if chosen_date.weekday() == 6:
-        raise ValueError(f"Selected date {chosen_date.strftime('%d-%m-%Y')} is a Sunday. Slots cannot be scheduled on Sundays.")
+    # Check if Sunday or Public Holiday
+    is_holiday, holiday_name = is_interaction_holiday(chosen_date)
+    if is_holiday:
+        raise ValueError(
+            f"Selected date {chosen_date.strftime('%d-%m-%Y')} is a holiday ({holiday_name}). "
+            f"Interaction slots cannot be scheduled on Sundays or public holidays."
+        )
 
     # Count current bookings excluding this application itself (if updating)
     booked_count = AdmissionApplication.objects.filter(

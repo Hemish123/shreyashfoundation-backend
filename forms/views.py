@@ -78,12 +78,23 @@ def get_performance_tag(score: int, max_score: int = 50) -> str:
 def get_authenticated_admin_user(request) -> tuple[bool, Optional[AdminUser], str]:
     """
     Strict Token Authentication for Admin/Staff endpoints.
-    Requires 'Authorization: Bearer <token>' in request headers.
+    Requires 'Authorization: Bearer <token>' in request headers or '?token=<token>' in query params.
     Returns (is_authenticated, admin_user_obj, role)
     """
     auth_header = request.headers.get('Authorization') or request.META.get('HTTP_AUTHORIZATION') or ""
     if auth_header and auth_header.lower().startswith('bearer '):
         user = get_admin_user_from_token(auth_header)
+        if user:
+            return True, user, user.role
+
+    query_token = (
+        request.query_params.get('token')
+        or request.query_params.get('access_token')
+        or request.GET.get('token')
+        or ""
+    ).strip()
+    if query_token:
+        user = get_admin_user_from_token(query_token)
         if user:
             return True, user, user.role
 
@@ -691,9 +702,26 @@ class AdminInteractionCalendarView(APIView):
                 "slots": slots_list
             })
 
+        from .slot_service import INTERACTION_START_DATE, INTERACTION_END_DATE, PUBLIC_HOLIDAYS, SLOT_DEFINITIONS
+
+        holidays_list = [
+            {"date": str(h_date), "name": h_name}
+            for h_date, h_name in sorted(PUBLIC_HOLIDAYS.items())
+        ]
+
         return Response({
             "status": "success",
             "total_days_scheduled": len(days_list),
+            "schedule_rules": {
+                "start_date": str(INTERACTION_START_DATE),
+                "end_date": str(INTERACTION_END_DATE) if INTERACTION_END_DATE else None,
+                "is_open_ended": INTERACTION_END_DATE is None,
+                "working_days": "Monday to Saturday (Sundays & Public Holidays skipped)",
+                "daily_standard_capacity": 40,
+                "daily_max_admin_capacity": 52,
+                "slots": SLOT_DEFINITIONS,
+                "holidays": holidays_list
+            },
             "calendar": days_list
         }, status=status.HTTP_200_OK)
 
@@ -2869,35 +2897,305 @@ class ParentConfirmInteractionSlotView(APIView):
         }, status=status.HTTP_200_OK)
 
 
+def _sign_azure_blob_url_if_needed(file_url: Optional[str]) -> Optional[str]:
+    """
+    If file_url points to our Azure Blob Storage container and does not already have a SAS signature,
+    appends a temporary read-only SAS token so images/documents render and print seamlessly inside the A4 PDF/HTML.
+    """
+    if not file_url or not isinstance(file_url, str):
+        return None
+    if "sig=" in file_url:
+        return file_url
+
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(file_url)
+        acct_name = getattr(settings, 'AZURE_ACCOUNT_NAME', None)
+        acct_key = getattr(settings, 'AZURE_ACCOUNT_KEY', None)
+        container = getattr(settings, 'AZURE_CONTAINER', 'media')
+
+        if acct_name and acct_key and parsed.netloc and acct_name.lower() in parsed.netloc.lower():
+            from datetime import datetime, timedelta, timezone as dt_tz
+            from azure.storage.blob import generate_blob_sas, BlobSasPermissions
+
+            clean_path = parsed.path.lstrip('/')
+            container_prefix = f"{container}/"
+            if clean_path.startswith(container_prefix):
+                blob_name = clean_path[len(container_prefix):]
+            else:
+                blob_name = clean_path
+
+            sas_token = generate_blob_sas(
+                account_name=acct_name,
+                container_name=container,
+                blob_name=blob_name,
+                account_key=acct_key,
+                permission=BlobSasPermissions(read=True),
+                expiry=datetime.now(dt_tz.utc) + timedelta(hours=2)
+            )
+            if sas_token:
+                sep = "&" if "?" in file_url else "?"
+                return f"{file_url}{sep}{sas_token}"
+    except Exception as e:
+        logger.warning(f"[SAS SIGNING] Could not sign blob URL {file_url}: {e}")
+
+    return file_url
+
+
 def generate_professional_school_admission_form_html(forms_list):
     """
-    Renders an authentic, high-end, professional School Admission Physical Form (A4 printable).
+    Renders an authentic, high-end, professional School Admission Physical Form & Quiz Result Document (A4 printable / PDF).
     Features:
-    - Official Shreyas Foundation & Vikas Kendra crest header
-    - Form metadata, Passport photo box with dashed border
-    - Standard tabular school layout (Student profile, Family bio, Residential address)
-    - Part X & Part Y assessment breakdown table with marks
-    - Signatures block (Mother, Father, Guardian, Principal/Head of School)
-    - CSS @media print optimization (auto page break, crisp typography)
+    - Top Floating Action Bar (Print / Save as PDF & Download HTML Document buttons - hidden on print)
+    - Page 1: Complete Admission Application Details (Student, Milestones, Health, Parents/Guardian, Siblings, Present School, Vikas Kendra Activities, Uploaded Documents Checklist, Part X & Y Assessment Scorecard, Declaration & Signatures)
+    - Page 2: Complete Parental Understanding & Partnership Questionnaire (Quiz Result Summary, 10 MCQs with Selected Option & Marks, 4 Written Responses with AI/Educator Evaluation & Feedback)
     """
+    import html as html_lib
+
+    def esc(val, default="-"):
+        if val is None or str(val).strip() == "":
+            return default
+        return html_lib.escape(str(val))
+
     cards_html = ""
     for idx, item in enumerate(forms_list):
         sh = item.get("school_header", {})
         fd = item.get("form_details", {})
         sp = item.get("student_profile", {})
         pp = item.get("parent_profile", {})
+        gp = item.get("guardian_profile", {})
+        sib_info = item.get("siblings_info", {})
+        ps_info = item.get("previous_school", {})
+        vk_info = item.get("vikas_kendra_activities", {})
+        docs_info = item.get("documents_uploaded", {})
+        inter_info = item.get("interaction_schedule", {})
         scores = item.get("assessment_scores", {})
         px = scores.get("part_x", {})
         py = scores.get("part_y", {})
         sigs = item.get("signatures_and_declarations", {})
+        quiz = item.get("quiz_result", {})
 
-        photo_html = f'<img src="{sp.get("photo_url")}" class="student-photo" alt="Student Photo" />' if sp.get("photo_url") else '<div class="photo-placeholder">Affix Recent<br>Passport Size<br>Photograph Here</div>'
-        father_sig_html = f'<img src="{sigs.get("father_signature_url")}" class="sig-img" />' if sigs.get("father_signature_url") else '<div class="sig-space"></div>'
-        mother_sig_html = f'<img src="{sigs.get("mother_signature_url")}" class="sig-img" />' if sigs.get("mother_signature_url") else '<div class="sig-space"></div>'
+        signed_photo_url = _sign_azure_blob_url_if_needed(sp.get("photo_url"))
+        signed_father_sig = _sign_azure_blob_url_if_needed(sigs.get("father_signature_url"))
+        signed_mother_sig = _sign_azure_blob_url_if_needed(sigs.get("mother_signature_url"))
+        signed_guardian_sig = _sign_azure_blob_url_if_needed(sigs.get("guardian_signature_url"))
+
+        photo_html = f'<img src="{signed_photo_url}" class="student-photo" alt="Student Photo" />' if signed_photo_url else '<div class="photo-placeholder">Affix Recent<br>Passport Size<br>Photograph Here</div>'
+        father_sig_html = f'<img src="{signed_father_sig}" class="sig-img" />' if signed_father_sig else '<div class="sig-space"></div>'
+        mother_sig_html = f'<img src="{signed_mother_sig}" class="sig-img" />' if signed_mother_sig else '<div class="sig-space"></div>'
+        guardian_sig_html = f'<img src="{signed_guardian_sig}" class="sig-img" />' if signed_guardian_sig else '<div class="sig-space"></div>'
 
         break_class = "page-break" if idx > 0 else ""
 
+        # Guardian rows if present
+        guardian_html = ""
+        if not pp.get("has_parents", True) or gp.get("guardian_name") or gp.get("guardians_list"):
+            g_full = f"{gp.get('guardian_name') or ''} {gp.get('guardian_father_name') or ''} {gp.get('guardian_surname') or ''}".strip() or "-"
+            guardian_html = f"""
+            <div class="section-title">2B. GUARDIAN PARTICULARS</div>
+            <table class="grid-table">
+                <tr>
+                    <td class="lbl" style="width: 20%;">Guardian Full Name:</td>
+                    <td class="val font-semibold" style="width: 30%;">{esc(g_full)}</td>
+                    <td class="lbl" style="width: 20%;">Mobile / WhatsApp:</td>
+                    <td class="val" style="width: 30%;">{esc(gp.get('guardian_whatsapp') or gp.get('guardian_phone_residence'))}</td>
+                </tr>
+                <tr>
+                    <td class="lbl">Education & Occupation:</td>
+                    <td class="val">{esc(gp.get('guardian_education'))} / {esc(gp.get('guardian_occupation'))}</td>
+                    <td class="lbl">Annual Income & Email:</td>
+                    <td class="val">{esc(gp.get('guardian_annual_income'))} | {esc(gp.get('guardian_email'))}</td>
+                </tr>
+                <tr>
+                    <td class="lbl">Residential Address:</td>
+                    <td class="val">{esc(gp.get('guardian_address_residence'))}</td>
+                    <td class="lbl">Office Address:</td>
+                    <td class="val">{esc(gp.get('guardian_address_office'))}</td>
+                </tr>
+            </table>
+            """
+
+        # Languages Known helper
+        langs_known = sp.get("languages_known") or {}
+        if isinstance(langs_known, dict) and langs_known:
+            lang_parts = []
+            for who, l_val in langs_known.items():
+                if isinstance(l_val, dict):
+                    sub_p = [f"{k}: {v}" for k, v in l_val.items() if v]
+                    if sub_p:
+                        lang_parts.append(f"{who.title()} ({', '.join(sub_p)})")
+                elif isinstance(l_val, list):
+                    lang_parts.append(f"{who.title()}: {', '.join(str(x) for x in l_val)}")
+                elif l_val:
+                    lang_parts.append(f"{who.title()}: {l_val}")
+            langs_known_str = " | ".join(lang_parts) if lang_parts else "-"
+        else:
+            langs_known_str = "-"
+
+        # Siblings rows
+        siblings_list = sib_info.get("siblings_list") or []
+        if sib_info.get("has_sibling_in_shreyas"):
+            if siblings_list:
+                sib_rows = []
+                for s_idx, s_obj in enumerate(siblings_list, start=1):
+                    s_name = s_obj.get("name") or s_obj.get("sibling_name") or "-"
+                    s_cls = s_obj.get("class") or s_obj.get("sibling_class") or "-"
+                    vk1_r = s_obj.get("vk1_receipt") or s_obj.get("sibling_vikas_kendra_1_receipt") or ("Yes" if s_obj.get("vk1_opted") else "No")
+                    vk2_r = s_obj.get("vk2_receipt") or s_obj.get("sibling_vikas_kendra_2_receipt") or ("Yes" if s_obj.get("vk2_opted") else "No")
+                    vk3_r = s_obj.get("vk3_receipt") or s_obj.get("sibling_vikas_kendra_3_receipt") or ("Yes" if s_obj.get("vk3_opted") else "No")
+                    sib_rows.append(f"#{s_idx}: <strong>{esc(s_name)}</strong> (Class: {esc(s_cls)}) — VK1: {esc(vk1_r)}, VK2: {esc(vk2_r)}, VK3: {esc(vk3_r)}")
+                sibling_summary_html = "<br>".join(sib_rows)
+            else:
+                s_name = sib_info.get("sibling_name") or "-"
+                s_cls = sib_info.get("sibling_class") or "-"
+                vk1_r = sib_info.get("vk1_receipt") or sib_info.get("vk1_opted") or "-"
+                vk2_r = sib_info.get("vk2_receipt") or sib_info.get("vk2_opted") or "-"
+                sibling_summary_html = f"<strong>{esc(s_name)}</strong> (Class: {esc(s_cls)}) | VK1 Receipt: {esc(vk1_r)} | VK2 Receipt: {esc(vk2_r)}"
+        else:
+            sibling_summary_html = "No Sibling in Shreyas"
+
+        # Vikas Kendra Activities
+        vk1_acts = ", ".join(str(x) for x in (vk_info.get("vk1") or [])) or "-"
+        vk2_acts = ", ".join(str(x) for x in (vk_info.get("vk2") or [])) or "-"
+        vk3_acts = ", ".join(str(x) for x in (vk_info.get("vk3") or [])) or "-"
+
+        # Uploaded Documents Badges & Embedded Annexures
+        doc_items_list = [
+            ("Child Passport Photograph", docs_info.get("photograph_child")),
+            ("Birth Certificate", docs_info.get("birth_certificate")),
+            ("Child's Aadhar Card", docs_info.get("child_aadhar_card")),
+            ("Parent's / Guardian's Aadhar Card", docs_info.get("parent_aadhar_card")),
+            ("Doctor's Health Certificate", docs_info.get("health_certificate")),
+            ("Eye Checkup Certificate", docs_info.get("eye_checkup_certificate")),
+            ("Caste Certificate", docs_info.get("caste_certificate")),
+            ("Previous Year's Report Card", docs_info.get("previous_report_card")),
+            ("Alak Malak Certificate", docs_info.get("alak_malak_certificate")),
+        ]
+        doc_badges = []
+        uploaded_annexures = []
+        for doc_label, raw_doc_url in doc_items_list:
+            doc_url = _sign_azure_blob_url_if_needed(raw_doc_url)
+            if doc_url:
+                doc_badges.append(f'<a href="{esc(doc_url)}" target="_blank" class="doc-pill doc-ok">&#10004; {esc(doc_label)}</a>')
+                uploaded_annexures.append((doc_label, doc_url))
+            else:
+                doc_badges.append(f'<span class="doc-pill doc-missing">&#10008; {esc(doc_label)}</span>')
+        docs_html = " ".join(doc_badges)
+
+        total_pages_for_student = 3 if uploaded_annexures else 2
+
+        # Build Page 3: Embedded Documents & Certificates Annexures
+        annexures_page_html = ""
+        if uploaded_annexures:
+            annexure_cards_html = ""
+            for ann_idx, (ann_label, ann_url) in enumerate(uploaded_annexures, start=1):
+                clean_path_lower = ann_url.split("?")[0].lower()
+                is_pdf = clean_path_lower.endswith(".pdf")
+                is_word = clean_path_lower.endswith(".doc") or clean_path_lower.endswith(".docx")
+
+                if is_pdf:
+                    preview_html = f"""
+                    <iframe src="{esc(ann_url)}" class="annexure-pdf-frame" title="{esc(ann_label)}"></iframe>
+                    <div class="annexure-fallback">PDF Document Attached — <a href="{esc(ann_url)}" target="_blank">Click here to open full PDF ({esc(ann_label)})</a></div>
+                    """
+                elif is_word:
+                    preview_html = f"""
+                    <div class="annexure-doc-box">
+                        <div style="font-size: 26px; margin-bottom: 4px;">📄</div>
+                        <div><strong>{esc(ann_label)} (Word Document)</strong></div>
+                        <div style="margin-top: 4px;"><a href="{esc(ann_url)}" target="_blank" class="doc-pill doc-ok">Download / View Document</a></div>
+                    </div>
+                    """
+                else:
+                    preview_html = f"""
+                    <div class="annexure-img-wrapper">
+                        <img src="{esc(ann_url)}" alt="{esc(ann_label)}" class="annexure-img" />
+                    </div>
+                    """
+
+                annexure_cards_html += f"""
+                <div class="annexure-card">
+                    <div class="annexure-card-header">
+                        <span><strong>Annexure #{ann_idx}: {esc(ann_label)}</strong></span>
+                        <a href="{esc(ann_url)}" target="_blank" class="annexure-open-link no-print">Open Original ↗</a>
+                    </div>
+                    <div class="annexure-card-body">
+                        {preview_html}
+                    </div>
+                </div>
+                """
+
+            annexures_page_html = f"""
+        <!-- PAGE 3: UPLOADED DOCUMENTS & CERTIFICATES ANNEXURES -->
+        <div class="admission-sheet page-break">
+            <div class="header-container" style="padding-bottom: 6px; margin-bottom: 6px;">
+                <div class="logo-area">
+                    <div class="school-logo">🌿</div>
+                </div>
+                <div class="header-text">
+                    <h1 class="trust-title">SHREYAS FOUNDATION — UPLOADED DOCUMENTS &amp; CERTIFICATES</h1>
+                    <p class="school-subtitle">Student: <strong>{esc(sp.get('first_name'))} {esc(sp.get('surname'))}</strong> | App No: <strong>{esc(fd.get('application_number'))}</strong> | Submission ID: <strong>#{esc(fd.get('submission_id'))}</strong> | Total Attached Documents: <strong>{len(uploaded_annexures)}</strong></p>
+                </div>
+            </div>
+
+            <div class="section-title">ATTACHED CERTIFICATES, AADHAR CARDS &amp; VERIFICATION DOCUMENTS</div>
+            <div class="annexures-grid">
+                {annexure_cards_html}
+            </div>
+
+            <div class="form-footer">
+                <div>Application No: {esc(fd.get('application_number'))} | Student: {esc(sp.get('first_name'))} {esc(sp.get('surname'))}</div>
+                <div>Page 3 of {total_pages_for_student} (Uploaded Documents &amp; Certificates Annexures)</div>
+            </div>
+        </div>
+            """
+
+        # Build Page 2: Parental Quiz Result & Question-by-Question Breakdown
+        mcq_rows_html = ""
+        for q_item in quiz.get("mcq_questions", []):
+            is_best = q_item.get("earned_marks", 0) == q_item.get("max_marks", 3)
+            score_cls = "q-score-high" if is_best else ("q-score-mid" if q_item.get("earned_marks", 0) >= 2 else "q-score-low")
+            mcq_rows_html += f"""
+            <tr>
+                <td class="text-center font-semibold">Q{q_item.get('id')}</td>
+                <td>
+                    <div class="q-focus">{esc(q_item.get('focus'))}</div>
+                    <div class="q-text">{esc(q_item.get('question_en'))}</div>
+                    <div class="q-text-gu">{esc(q_item.get('question_gu'))}</div>
+                </td>
+                <td>
+                    <div><strong>Option {esc(q_item.get('selected_key'))}:</strong> {esc(q_item.get('selected_text_en'))}</div>
+                    <div class="q-text-gu">{esc(q_item.get('selected_text_gu'))}</div>
+                </td>
+                <td class="text-center"><span class="{score_cls}">{q_item.get('earned_marks', 0)} / {q_item.get('max_marks', 3)}</span></td>
+            </tr>
+            """
+
+        written_rows_html = ""
+        for w_item in quiz.get("written_questions", []):
+            written_rows_html += f"""
+            <tr>
+                <td class="text-center font-semibold">Q{w_item.get('id')}</td>
+                <td style="width: 36%;">
+                    <div class="q-focus">{esc(w_item.get('focus'))}</div>
+                    <div class="q-text">{esc(w_item.get('question_en'))}</div>
+                    <div class="q-text-gu">{esc(w_item.get('question_gu'))}</div>
+                </td>
+                <td style="width: 34%;">
+                    <div class="written-ans-box">{esc(w_item.get('parent_answer'), 'No answer provided')}</div>
+                </td>
+                <td style="width: 22%;">
+                    <div class="font-semibold" style="color: #0f3d2e; margin-bottom: 3px;">Score: {w_item.get('earned_marks', 0)} / {w_item.get('max_marks', 5)}</div>
+                    <div class="ai-fb-box">{esc(w_item.get('ai_feedback'), 'Evaluated')}</div>
+                </td>
+            </tr>
+            """
+
+        qa_status_val = quiz.get("qa_status", "PENDING")
+        qa_pill_cls = "status-pill" if qa_status_val == "PASSED" else "rank-badge"
+
         cards_html += f"""
+        <!-- PAGE 1: OFFICIAL ADMISSION APPLICATION & ASSESSMENT FORM -->
         <div class="admission-sheet {break_class}">
             <!-- Header Section -->
             <div class="header-container">
@@ -2905,11 +3203,11 @@ def generate_professional_school_admission_form_html(forms_list):
                     <div class="school-logo">🌿</div>
                 </div>
                 <div class="header-text">
-                    <h1 class="trust-title">{sh.get('trust_name', 'Shreyas Foundation').upper()}</h1>
-                    <h2 class="school-title">{sh.get('school_name', 'Vikas Kendra').upper()}</h2>
+                    <h1 class="trust-title">{esc(sh.get('trust_name', 'Shreyas Foundation')).upper()}</h1>
+                    <h2 class="school-title">{esc(sh.get('school_name', 'Vikas Kendra')).upper()}</h2>
                     <p class="school-subtitle">Post Box No. 4070, Near Manekbaug Hall, Ambawadi, Ahmedabad – 380015</p>
-                    <div class="badge-title">OFFICIAL ADMISSION APPLICATION & ASSESSMENT RECORD</div>
-                    <div class="academic-year">ACADEMIC SESSION: {sh.get('academic_session', '2026 - 2027')}</div>
+                    <div class="badge-title">OFFICIAL ADMISSION APPLICATION &amp; ASSESSMENT RECORD</div>
+                    <div class="academic-year">ACADEMIC SESSION: {esc(sh.get('academic_session', '2026 - 2027'))}</div>
                 </div>
                 <div class="photo-container">
                     {photo_html}
@@ -2919,99 +3217,144 @@ def generate_professional_school_admission_form_html(forms_list):
             <!-- Meta Strip -->
             <table class="form-meta-table">
                 <tr>
-                    <td style="width: 25%;"><strong>Application No:</strong> <span class="highlight">{fd.get('application_number')}</span></td>
-                    <td style="width: 25%;"><strong>Date of Submission:</strong> {fd.get('date_of_submission')}</td>
-                    <td style="width: 25%;"><strong>Standard & Medium:</strong> {fd.get('standard')} ({fd.get('medium')})</td>
-                    <td style="width: 25%;"><strong>Vibhag:</strong> {fd.get('vibhag')}</td>
+                    <td style="width: 25%;"><strong>Application No:</strong> <span class="highlight">{esc(fd.get('application_number'))}</span></td>
+                    <td style="width: 25%;"><strong>Submission ID:</strong> #{esc(fd.get('submission_id'))} ({esc(fd.get('date_of_submission'))})</td>
+                    <td style="width: 25%;"><strong>Standard &amp; Medium:</strong> {esc(fd.get('standard'))} ({esc(fd.get('medium'))})</td>
+                    <td style="width: 25%;"><strong>Vibhag:</strong> {esc(fd.get('vibhag'))}</td>
                 </tr>
                 <tr>
-                    <td><strong>Merit Rank:</strong> <span class="rank-badge">#{fd.get('merit_rank') or '-'}</span></td>
-                    <td><strong>Admission Status:</strong> <span class="status-pill">{fd.get('admission_status')}</span></td>
-                    <td colspan="2"><strong>Cutoff Qualification:</strong> Eligible for Enrollment</td>
+                    <td><strong>Merit Rank:</strong> <span class="rank-badge">#{esc(fd.get('merit_rank'))}</span></td>
+                    <td><strong>Admission Status:</strong> <span class="status-pill">{esc(fd.get('admission_status'))}</span></td>
+                    <td><strong>Quiz Result:</strong> <span class="{qa_pill_cls}">{esc(quiz.get('total_score', 0))}/50 ({esc(qa_status_val)} - {esc(quiz.get('tag'))})</span></td>
+                    <td><strong>Interaction Slot:</strong> {esc(inter_info.get('date'))} ({esc(inter_info.get('time'))})</td>
                 </tr>
             </table>
 
-            <!-- Section 1: Student Information -->
-            <div class="section-title">1. STUDENT PARTICULARS</div>
+            <!-- Section 1: Student Information, Milestones & Health -->
+            <div class="section-title">1. STUDENT PARTICULARS, MILESTONES &amp; HEALTH DETAILS</div>
             <table class="grid-table">
                 <tr>
-                    <td class="lbl" style="width: 20%;">Student's Full Name:</td>
-                    <td colspan="3" class="val" style="font-weight: bold; font-size: 13px;">{sp.get('first_name')} {sp.get('surname')}</td>
+                    <td class="lbl" style="width: 18%;">Student's Full Name:</td>
+                    <td class="val" style="width: 32%; font-weight: bold; font-size: 12px;">{esc(sp.get('first_name'))} {esc(sp.get('father_name'))} {esc(sp.get('surname'))}</td>
+                    <td class="lbl" style="width: 18%;">Date of Birth &amp; Age:</td>
+                    <td class="val" style="width: 32%;">{esc(sp.get('date_of_birth'))} (Age: {esc(sp.get('age_summary'))})</td>
                 </tr>
                 <tr>
-                    <td class="lbl">Date of Birth:</td>
-                    <td class="val" style="width: 30%;">{sp.get('date_of_birth')}</td>
-                    <td class="lbl" style="width: 20%;">Gender:</td>
-                    <td class="val" style="width: 30%;">{sp.get('gender') or 'Not Specified'}</td>
+                    <td class="lbl">Birth Place (City/Taluka/Dist):</td>
+                    <td class="val">{esc(sp.get('birth_place_full'))}</td>
+                    <td class="lbl">Height &amp; Weight:</td>
+                    <td class="val">Height: {esc(sp.get('height_cm'))} cm | Weight: {esc(sp.get('weight_kg'))} kg</td>
                 </tr>
                 <tr>
-                    <td class="lbl">Place of Birth:</td>
-                    <td class="val">{sp.get('birth_place')}</td>
-                    <td class="lbl">Blood Group:</td>
-                    <td class="val">{sp.get('blood_group')}</td>
+                    <td class="lbl">Mother Tongue (M / F):</td>
+                    <td class="val">Mother: {esc(sp.get('mother_tongue_mother'))} | Father: {esc(sp.get('mother_tongue_father'))}</td>
+                    <td class="lbl">Developmental Milestones:</td>
+                    <td class="val">Started Talking: {esc(sp.get('age_started_talking'))} | Walking: {esc(sp.get('age_started_walking'))}</td>
                 </tr>
                 <tr>
-                    <td class="lbl">Mother Tongue:</td>
-                    <td class="val">{sp.get('mother_tongue')}</td>
-                    <td class="lbl">Nationality:</td>
-                    <td class="val">{sp.get('nationality')}</td>
+                    <td class="lbl">Languages Known:</td>
+                    <td colspan="3" class="val">{esc(langs_known_str)}</td>
+                </tr>
+                <tr>
+                    <td class="lbl">Past Illness / Medical History:</td>
+                    <td class="val">{esc(sp.get('past_illness'))}</td>
+                    <td class="lbl">Specific Care Needed:</td>
+                    <td class="val">{esc(sp.get('specific_care_needed'))}</td>
                 </tr>
             </table>
 
             <!-- Section 2: Family Information -->
-            <div class="section-title">2. PARENTS / GUARDIAN PARTICULARS</div>
+            <div class="section-title">2. PARENTS PARTICULARS (FATHER &amp; MOTHER)</div>
             <table class="grid-table">
                 <thead>
                     <tr class="sub-head">
                         <th style="width: 20%;">Particulars</th>
-                        <th style="width: 40%;">Father / Primary Guardian</th>
-                        <th style="width: 40%;">Mother</th>
+                        <th style="width: 40%;">Father Details</th>
+                        <th style="width: 40%;">Mother Details</th>
                     </tr>
                 </thead>
                 <tbody>
                     <tr>
-                        <td class="lbl">Full Name:</td>
-                        <td class="val font-semibold">{pp.get('father_name')} {pp.get('father_surname')}</td>
-                        <td class="val font-semibold">{pp.get('mother_name')} {pp.get('mother_surname')}</td>
+                        <td class="lbl">Full Name (Name / Father / Surname):</td>
+                        <td class="val font-semibold">{esc(pp.get('father_name'))} {esc(pp.get('father_father_name'))} {esc(pp.get('father_surname'))}</td>
+                        <td class="val font-semibold">{esc(pp.get('mother_name'))} {esc(pp.get('mother_father_or_husband_name'))} {esc(pp.get('mother_surname'))}</td>
                     </tr>
                     <tr>
                         <td class="lbl">Educational Qualification:</td>
-                        <td class="val">{pp.get('father_qualification') or '-'}</td>
-                        <td class="val">{pp.get('mother_qualification') or '-'}</td>
+                        <td class="val">{esc(pp.get('father_qualification'))}</td>
+                        <td class="val">{esc(pp.get('mother_qualification'))}</td>
                     </tr>
                     <tr>
-                        <td class="lbl">Occupation & Designation:</td>
-                        <td class="val">{pp.get('father_occupation') or '-'}</td>
-                        <td class="val">{pp.get('mother_occupation') or '-'}</td>
+                        <td class="lbl">Occupation &amp; Annual Income:</td>
+                        <td class="val">{esc(pp.get('father_occupation'))} (Income: {esc(pp.get('father_annual_income'))})</td>
+                        <td class="val">{esc(pp.get('mother_occupation'))} (Income: {esc(pp.get('mother_annual_income'))})</td>
                     </tr>
                     <tr>
-                        <td class="lbl">Annual Income:</td>
-                        <td class="val">{pp.get('father_annual_income') or '-'}</td>
-                        <td class="val">{pp.get('mother_annual_income') or '-'}</td>
+                        <td class="lbl">WhatsApp / Residence / Office Phone:</td>
+                        <td class="val">WA: {esc(pp.get('father_mobile'))} | Res: {esc(pp.get('father_phone_residence'))} | Off: {esc(pp.get('father_phone_office'))}</td>
+                        <td class="val">WA: {esc(pp.get('mother_mobile'))} | Res: {esc(pp.get('mother_phone_residence'))} | Off: {esc(pp.get('mother_phone_office'))}</td>
                     </tr>
                     <tr>
-                        <td class="lbl">Mobile / WhatsApp:</td>
-                        <td class="val">{pp.get('father_mobile')}</td>
-                        <td class="val">{pp.get('mother_mobile')}</td>
-                    </tr>
-                    <tr>
-                        <td class="lbl">Email Address:</td>
-                        <td class="val">{pp.get('father_email') or '-'}</td>
-                        <td class="val">{pp.get('mother_email') or '-'}</td>
+                        <td class="lbl">Email &amp; Nationality:</td>
+                        <td class="val">{esc(pp.get('father_email'))} ({esc(pp.get('father_nationality', 'Indian'))})</td>
+                        <td class="val">{esc(pp.get('mother_email'))} ({esc(pp.get('mother_nationality', 'Indian'))})</td>
                     </tr>
                     <tr>
                         <td class="lbl">Residential Address:</td>
-                        <td colspan="2" class="val">{pp.get('residential_address')}</td>
+                        <td class="val">{esc(pp.get('father_address_residence') or pp.get('residential_address'))}</td>
+                        <td class="val">{esc(pp.get('mother_address_residence') or pp.get('residential_address'))}</td>
+                    </tr>
+                    <tr>
+                        <td class="lbl">Office Address:</td>
+                        <td class="val">{esc(pp.get('father_address_office'))}</td>
+                        <td class="val">{esc(pp.get('mother_address_office'))}</td>
                     </tr>
                 </tbody>
             </table>
 
-            <!-- Section 3: Assessment Summary -->
-            <div class="section-title">3. ASSESSMENT & MERIT EVALUATION SCORECARD</div>
+            {guardian_html}
+
+            <!-- Section 3: Siblings, Present School, Alak Malak & Vikas Kendra -->
+            <div class="section-title">3. SIBLINGS IN SHREYAS, PREVIOUS SCHOOL &amp; VIKAS KENDRA ACTIVITIES</div>
+            <table class="grid-table">
+                <tr>
+                    <td class="lbl" style="width: 20%;">Siblings in Shreyas:</td>
+                    <td colspan="3" class="val">{sibling_summary_html}</td>
+                </tr>
+                <tr>
+                    <td class="lbl">Present / Previous School:</td>
+                    <td class="val" style="width: 30%;">{esc(ps_info.get('school_name'))} ({esc(ps_info.get('school_place'))})</td>
+                    <td class="lbl" style="width: 20%;">School Std, Medium &amp; Year:</td>
+                    <td class="val" style="width: 30%;">Std: {esc(ps_info.get('school_std'))} | Med: {esc(ps_info.get('school_medium'))} | Year: {esc(ps_info.get('school_year'))}</td>
+                </tr>
+                <tr>
+                    <td class="lbl">Attended Alak Malak?:</td>
+                    <td class="val">{"Yes" if px.get("has_attended_alak_malak") else "No"} (Duration: {esc(px.get("alak_malak_months", 0))} Months)</td>
+                    <td class="lbl">Schooling Declarations:</td>
+                    <td class="val">No Private Tuitions: <strong>{"Yes" if sigs.get("agrees_discourage_private_tuitions") else "No"}</strong> | Natural Medium: <strong>{"Yes" if sigs.get("open_to_natural_medium_schooling") else "No"}</strong></td>
+                </tr>
+                <tr>
+                    <td class="lbl">Vikas Kendra 1 (Opt 5):</td>
+                    <td colspan="3" class="val">{esc(vk1_acts)}</td>
+                </tr>
+                <tr>
+                    <td class="lbl">Vikas Kendra 2 (Opt 3):</td>
+                    <td class="val">{esc(vk2_acts)}</td>
+                    <td class="lbl">Vikas Kendra 3 Activities:</td>
+                    <td class="val">{esc(vk3_acts)}</td>
+                </tr>
+                <tr>
+                    <td class="lbl">Uploaded Documents:</td>
+                    <td colspan="3" class="val">{docs_html}</td>
+                </tr>
+            </table>
+
+            <!-- Section 4: Assessment Summary -->
+            <div class="section-title">4. ASSESSMENT &amp; MERIT EVALUATION SCORECARD</div>
             <table class="grid-table score-table">
                 <thead>
                     <tr class="sub-head">
-                        <th colspan="2">PART X: APPLICATION & BACKGROUND (MAX 20)</th>
+                        <th colspan="2">PART X: APPLICATION &amp; BACKGROUND (MAX 20)</th>
                         <th colspan="2">PART Y: EDUCATOR INTERACTION ASSESSMENT (MAX 30)</th>
                     </tr>
                 </thead>
@@ -3023,7 +3366,7 @@ def generate_professional_school_admission_form_html(forms_list):
                         <td class="val text-center" style="width: 20%; font-weight: bold;">{(py.get('cognitive_1') or 0) + (py.get('cognitive_2') or 0)} / 10</td>
                     </tr>
                     <tr>
-                        <td class="lbl">Parent Screening MCQ Score:</td>
+                        <td class="lbl">Parent Screening MCQ Score (Scaled):</td>
                         <td class="val text-center" style="font-weight: bold;">{px.get('parent_mcq', 0)} / 7</td>
                         <td class="lbl">Affective Domain Assessment:</td>
                         <td class="val text-center" style="font-weight: bold;">{py.get('affective', 0)} / 10</td>
@@ -3036,9 +3379,9 @@ def generate_professional_school_admission_form_html(forms_list):
                     </tr>
                     <tr>
                         <td class="lbl">Evaluation Observation Tags:</td>
-                        <td class="val text-center text-xs">M: {py.get('m_category') or '-'} | MI: {py.get('mi_category') or '-'}</td>
+                        <td class="val text-center text-xs">M: {esc(py.get('m_category'))} | MI: {esc(py.get('mi_category'))}</td>
                         <td class="lbl">Assigned Evaluator:</td>
-                        <td class="val text-center text-xs">{py.get('evaluator') or 'Admissions Board'}</td>
+                        <td class="val text-center text-xs">{esc(py.get('evaluator') or 'Admissions Board')}</td>
                     </tr>
                     <tr class="total-row">
                         <td class="total-lbl">TOTAL PART X SCORE:</td>
@@ -3048,14 +3391,15 @@ def generate_professional_school_admission_form_html(forms_list):
                     </tr>
                     <tr class="grand-total-row">
                         <td colspan="2" class="grand-lbl">FINAL AGGREGATE MERIT SCORE:</td>
-                        <td colspan="2" class="grand-val">{scores.get('final_score', 0)} / 50 Marks (Rank: #{fd.get('merit_rank') or '-'})</td>
+                        <td colspan="2" class="grand-val">{scores.get('final_score', 0)} / 50 Marks (Rank: #{esc(fd.get('merit_rank'))})</td>
                     </tr>
                 </tbody>
             </table>
 
-            <!-- Section 4: Declaration & Signatures -->
+            <!-- Section 5: Declaration & Signatures -->
             <div class="declaration-block">
-                <strong>Declaration:</strong> I/We hereby declare that all information furnished in this admission application is true and complete to the best of my/our knowledge. I/We agree to abide by the philosophy, rules, and code of conduct of Shreyas Foundation Vikas Kendra.
+                <strong>Declaration (Agreed to Rules: {"Yes" if sigs.get("agreed_to_rules") else "No"} | Date: {esc(sigs.get("terms_agreed_date"))}):</strong>
+                I/We hereby declare that all information furnished in this admission application is true and complete to the best of my/our knowledge. I/We agree to abide by the philosophy, rules, and code of conduct of Shreyas Foundation Vikas Kendra.
             </div>
 
             <div class="signatures-container">
@@ -3068,8 +3412,8 @@ def generate_professional_school_admission_form_html(forms_list):
                     <div class="sig-line">Mother's Signature</div>
                 </div>
                 <div class="sig-box">
-                    <div class="sig-space"></div>
-                    <div class="sig-line">Educator / Evaluator</div>
+                    {guardian_sig_html}
+                    <div class="sig-line">Guardian's Signature</div>
                 </div>
                 <div class="sig-box">
                     <div class="sig-space"></div>
@@ -3079,21 +3423,83 @@ def generate_professional_school_admission_form_html(forms_list):
 
             <!-- Footer -->
             <div class="form-footer">
-                <div>Document Generated On: {fd.get('date_of_submission')} | Vikas Kendra Admissions Control Center</div>
-                <div>Page 1 of 1</div>
+                <div>Document Generated On: {esc(fd.get('date_of_submission'))} | Application No: {esc(fd.get('application_number'))}</div>
+                <div>Page 1 of {total_pages_for_student} (Admission Application Form)</div>
             </div>
         </div>
+
+        <!-- PAGE 2: PARENTAL UNDERSTANDING & PARTNERSHIP QUESTIONNAIRE (QUIZ RESULT) -->
+        <div class="admission-sheet page-break">
+            <div class="header-container" style="padding-bottom: 6px; margin-bottom: 6px;">
+                <div class="logo-area">
+                    <div class="school-logo">🌿</div>
+                </div>
+                <div class="header-text">
+                    <h1 class="trust-title">SHREYAS FOUNDATION — PARENTAL QUESTIONNAIRE &amp; QUIZ RESULT</h1>
+                    <p class="school-subtitle">Student: <strong>{esc(sp.get('first_name'))} {esc(sp.get('surname'))}</strong> | App No: <strong>{esc(fd.get('application_number'))}</strong> | Submission ID: <strong>#{esc(fd.get('submission_id'))}</strong> | Standard: <strong>{esc(fd.get('standard'))} ({esc(fd.get('medium'))})</strong></p>
+                </div>
+            </div>
+
+            <!-- Quiz Score Summary Bar -->
+            <table class="form-meta-table">
+                <tr>
+                    <td style="width: 20%;"><strong>Quiz Status:</strong> <span class="{qa_pill_cls}">{esc(qa_status_val)}</span></td>
+                    <td style="width: 20%;"><strong>MCQ Score (Q1-Q10):</strong> <strong>{quiz.get('mcq_score', 0)} / 30</strong></td>
+                    <td style="width: 20%;"><strong>Written Score (Q11-Q14):</strong> <strong>{quiz.get('written_score', 0)} / 20</strong></td>
+                    <td style="width: 20%;"><strong>Total Quiz Score:</strong> <span class="highlight">{quiz.get('total_score', 0)} / 50</span></td>
+                    <td style="width: 20%;"><strong>Performance Tag:</strong> <strong>{esc(quiz.get('tag'))}</strong></td>
+                </tr>
+            </table>
+
+            <!-- Part A: 10 MCQs Table -->
+            <div class="section-title">PART A: MULTIPLE CHOICE QUESTIONS (10 QUESTIONS × 3 MARKS = 30 MARKS)</div>
+            <table class="grid-table">
+                <thead>
+                    <tr class="sub-head">
+                        <th style="width: 6%;">Q#</th>
+                        <th style="width: 46%;">Question &amp; Assessment Focus</th>
+                        <th style="width: 38%;">Parent's Selected Answer</th>
+                        <th style="width: 10%;">Marks</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {mcq_rows_html}
+                </tbody>
+            </table>
+
+            <!-- Part B: 4 Written Questions Table -->
+            <div class="section-title">PART B: WRITTEN REFLECTION QUESTIONS &amp; AI EVALUATION (4 QUESTIONS × 5 MARKS = 20 MARKS)</div>
+            <table class="grid-table">
+                <thead>
+                    <tr class="sub-head">
+                        <th style="width: 6%;">Q#</th>
+                        <th style="width: 36%;">Question Prompt</th>
+                        <th style="width: 36%;">Parent's Written Response</th>
+                        <th style="width: 22%;">Score &amp; Evaluation Feedback</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {written_rows_html}
+                </tbody>
+            </table>
+
+            <div class="form-footer">
+                <div>Quiz Completed At: {esc(quiz.get('quiz_completed_at'))} | Parent WhatsApp: {esc(pp.get('father_mobile') or pp.get('mother_mobile'))}</div>
+                <div>Page 2 of {total_pages_for_student} (Parental Quiz Result &amp; Evaluation Report)</div>
+            </div>
+        </div>
+        {annexures_page_html}
         """
 
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Official Admission Form - Shreyas Foundation</title>
+    <title>Official Admission &amp; Quiz Record - Shreyas Foundation</title>
     <style>
         @page {{
             size: A4 portrait;
-            margin: 10mm;
+            margin: 8mm;
         }}
         * {{
             box-sizing: border-box;
@@ -3103,14 +3509,59 @@ def generate_professional_school_admission_form_html(forms_list):
         body {{
             font-family: 'Segoe UI', Calibri, Arial, sans-serif;
             margin: 0;
-            padding: 10px;
+            padding: 55px 10px 20px 10px;
             background-color: #f1f5f9;
             color: #1e293b;
         }}
+        .top-action-bar {{
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 46px;
+            background: #0f3d2e;
+            color: #ffffff;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 20px;
+            z-index: 9999;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        }}
+        .top-action-bar .bar-title {{
+            font-size: 13px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+        }}
+        .top-action-bar .bar-actions {{
+            display: flex;
+            gap: 10px;
+        }}
+        .action-btn {{
+            background: #ffffff;
+            color: #0f3d2e;
+            border: none;
+            padding: 6px 14px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 700;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+        }}
+        .action-btn.primary {{
+            background: #fef08a;
+            color: #854d0e;
+        }}
+        .action-btn:hover {{
+            opacity: 0.92;
+        }}
         .admission-sheet {{
             width: 210mm;
-            min-height: 285mm;
-            padding: 12mm 14mm;
+            min-height: 282mm;
+            padding: 9mm 11mm;
             margin: 0 auto 15px auto;
             background: #ffffff;
             border: 2px solid #0f3d2e;
@@ -3124,61 +3575,61 @@ def generate_professional_school_admission_form_html(forms_list):
             display: flex;
             align-items: center;
             border-bottom: 2px solid #0f3d2e;
-            padding-bottom: 8px;
-            margin-bottom: 8px;
+            padding-bottom: 6px;
+            margin-bottom: 6px;
         }}
         .logo-area {{
-            width: 65px;
+            width: 55px;
             text-align: center;
         }}
         .school-logo {{
-            font-size: 42px;
+            font-size: 36px;
             line-height: 1;
         }}
         .header-text {{
             flex: 1;
             text-align: center;
-            padding: 0 10px;
+            padding: 0 8px;
         }}
         .trust-title {{
             margin: 0;
-            font-size: 16px;
+            font-size: 15px;
             font-weight: 800;
-            letter-spacing: 1px;
+            letter-spacing: 0.8px;
             color: #0f3d2e;
         }}
         .school-title {{
-            margin: 2px 0 0 0;
-            font-size: 20px;
+            margin: 1px 0 0 0;
+            font-size: 18px;
             font-weight: 900;
-            letter-spacing: 1.5px;
+            letter-spacing: 1.2px;
             color: #8b1e28;
         }}
         .school-subtitle {{
             margin: 2px 0;
-            font-size: 9px;
+            font-size: 8.5px;
             color: #475569;
         }}
         .badge-title {{
             display: inline-block;
             background-color: #0f3d2e;
             color: #ffffff;
-            font-size: 11px;
+            font-size: 10px;
             font-weight: bold;
-            padding: 3px 12px;
+            padding: 2px 10px;
             border-radius: 3px;
-            margin-top: 3px;
+            margin-top: 2px;
             letter-spacing: 0.5px;
         }}
         .academic-year {{
-            font-size: 10px;
+            font-size: 9.5px;
             font-weight: bold;
             color: #1e293b;
             margin-top: 2px;
         }}
         .photo-container {{
-            width: 85px;
-            height: 100px;
+            width: 78px;
+            height: 92px;
             border: 1.5px dashed #0f3d2e;
             display: flex;
             align-items: center;
@@ -3187,7 +3638,7 @@ def generate_professional_school_admission_form_html(forms_list):
             overflow: hidden;
         }}
         .photo-placeholder {{
-            font-size: 8px;
+            font-size: 7.5px;
             color: #64748b;
             text-align: center;
             padding: 4px;
@@ -3201,13 +3652,13 @@ def generate_professional_school_admission_form_html(forms_list):
         .form-meta-table {{
             width: 100%;
             border-collapse: collapse;
-            margin-bottom: 8px;
-            font-size: 10.5px;
+            margin-bottom: 6px;
+            font-size: 9.5px;
             background: #f8fafc;
             border: 1px solid #cbd5e1;
         }}
         .form-meta-table td {{
-            padding: 4px 6px;
+            padding: 3.5px 6px;
             border: 1px solid #cbd5e1;
         }}
         .highlight {{
@@ -3217,36 +3668,37 @@ def generate_professional_school_admission_form_html(forms_list):
         .rank-badge {{
             background: #fef08a;
             color: #854d0e;
-            padding: 1px 6px;
+            padding: 1px 5px;
             font-weight: bold;
             border-radius: 3px;
         }}
         .status-pill {{
             background: #dcfce7;
             color: #166534;
-            padding: 1px 6px;
+            padding: 1px 5px;
             font-weight: bold;
             border-radius: 3px;
         }}
         .section-title {{
             background: #0f3d2e;
             color: #ffffff;
-            font-size: 10.5px;
+            font-size: 9.5px;
             font-weight: bold;
-            padding: 3px 8px;
-            letter-spacing: 0.5px;
-            margin-top: 6px;
+            padding: 2.5px 7px;
+            letter-spacing: 0.4px;
+            margin-top: 5px;
             border-left: 4px solid #8b1e28;
         }}
         .grid-table {{
             width: 100%;
             border-collapse: collapse;
-            margin-bottom: 6px;
-            font-size: 10px;
+            margin-bottom: 5px;
+            font-size: 9px;
         }}
         .grid-table th, .grid-table td {{
             border: 1px solid #cbd5e1;
-            padding: 4px 6px;
+            padding: 3px 5px;
+            vertical-align: top;
         }}
         .grid-table .lbl {{
             background-color: #f8fafc;
@@ -3259,89 +3711,231 @@ def generate_professional_school_admission_form_html(forms_list):
         .grid-table .sub-head th {{
             background-color: #f1f5f9;
             color: #0f3d2e;
-            font-size: 9.5px;
+            font-size: 8.8px;
             text-align: center;
             font-weight: 700;
-            padding: 4px;
+            padding: 3px;
         }}
         .text-center {{ text-align: center; }}
         .font-semibold {{ font-weight: 600; }}
-        .text-xs {{ font-size: 9px; }}
-        
+        .text-xs {{ font-size: 8.5px; }}
+        .doc-pill {{
+            display: inline-block;
+            padding: 1px 5px;
+            margin: 1px 2px;
+            border-radius: 3px;
+            font-size: 8px;
+            font-weight: 600;
+            text-decoration: none;
+        }}
+        .doc-ok {{
+            background: #dcfce7;
+            color: #166534;
+            border: 1px solid #86efac;
+        }}
+        .doc-missing {{
+            background: #f1f5f9;
+            color: #64748b;
+            border: 1px solid #cbd5e1;
+        }}
+        .q-focus {{
+            font-size: 8px;
+            font-weight: 700;
+            color: #8b1e28;
+            text-transform: uppercase;
+            margin-bottom: 1px;
+        }}
+        .q-text {{
+            font-size: 8.8px;
+            color: #0f172a;
+            line-height: 1.25;
+        }}
+        .q-text-gu {{
+            font-size: 8.3px;
+            color: #475569;
+            line-height: 1.25;
+            margin-top: 1px;
+        }}
+        .q-score-high {{
+            background: #dcfce7;
+            color: #166534;
+            font-weight: 700;
+            padding: 1px 5px;
+            border-radius: 3px;
+        }}
+        .q-score-mid {{
+            background: #fef9c3;
+            color: #854d0e;
+            font-weight: 700;
+            padding: 1px 5px;
+            border-radius: 3px;
+        }}
+        .q-score-low {{
+            background: #fee2e2;
+            color: #991b1b;
+            font-weight: 700;
+            padding: 1px 5px;
+            border-radius: 3px;
+        }}
+        .written-ans-box {{
+            white-space: pre-wrap;
+            font-size: 8.8px;
+            color: #0f172a;
+            line-height: 1.3;
+        }}
+        .ai-fb-box {{
+            font-size: 8.2px;
+            color: #334155;
+            line-height: 1.25;
+            background: #f8fafc;
+            padding: 3px 4px;
+            border-left: 2px solid #0f3d2e;
+        }}
         .score-table .total-row td {{
             background-color: #f8fafc;
-            border-top: 2px solid #0f3d2e;
+            border-top: 1.5px solid #0f3d2e;
             font-weight: bold;
-            font-size: 10px;
+            font-size: 9.5px;
         }}
         .total-lbl {{ color: #0f3d2e; font-weight: bold; }}
-        .total-val {{ text-align: center; font-weight: bold; color: #8b1e28; font-size: 11px; }}
-        
+        .total-val {{ text-align: center; font-weight: bold; color: #8b1e28; font-size: 10px; }}
         .grand-total-row td {{
             background-color: #f0fdf4 !important;
-            border-top: 2px solid #16a34a !important;
-            border-bottom: 2px solid #16a34a !important;
+            border-top: 1.5px solid #16a34a !important;
+            border-bottom: 1.5px solid #16a34a !important;
         }}
         .grand-lbl {{
             font-weight: 900;
             color: #166534;
-            font-size: 11px;
+            font-size: 10px;
             text-align: right;
-            padding-right: 12px;
+            padding-right: 10px;
         }}
         .grand-val {{
             font-weight: 900;
             color: #166534;
-            font-size: 12px;
+            font-size: 11px;
             text-align: center;
         }}
         .declaration-block {{
             border: 1px dashed #cbd5e1;
-            padding: 6px 8px;
-            font-size: 8.5px;
+            padding: 4px 7px;
+            font-size: 8px;
             color: #475569;
-            line-height: 1.3;
-            margin-top: 6px;
-            margin-bottom: 14px;
+            line-height: 1.25;
+            margin-top: 4px;
+            margin-bottom: 8px;
             background: #fafaf9;
         }}
         .signatures-container {{
             display: flex;
             justify-content: space-between;
-            margin-top: 10px;
-            padding-top: 5px;
+            margin-top: 6px;
+            padding-top: 3px;
         }}
         .sig-box {{
             width: 23%;
             text-align: center;
         }}
         .sig-space {{
-            height: 35px;
+            height: 28px;
         }}
         .sig-img {{
-            max-height: 35px;
+            max-height: 28px;
             max-width: 100%;
             display: block;
             margin: 0 auto;
         }}
         .sig-line {{
             border-top: 1px solid #475569;
-            padding-top: 3px;
-            font-size: 9px;
+            padding-top: 2px;
+            font-size: 8.5px;
             font-weight: 600;
             color: #334155;
         }}
         .form-footer {{
             display: flex;
             justify-content: space-between;
-            font-size: 8px;
-            color: #94a3b8;
+            font-size: 7.8px;
+            color: #64748b;
             border-top: 1px solid #e2e8f0;
-            padding-top: 4px;
-            margin-top: 15px;
+            padding-top: 3px;
+            margin-top: 8px;
+        }}
+        .annexures-grid {{
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-top: 8px;
+        }}
+        .annexure-card {{
+            border: 1px solid #cbd5e1;
+            border-radius: 4px;
+            background: #ffffff;
+            overflow: hidden;
+            page-break-inside: avoid;
+            break-inside: avoid;
+        }}
+        .annexure-card-header {{
+            background: #f1f5f9;
+            color: #0f3d2e;
+            font-size: 9px;
+            padding: 4px 8px;
+            border-bottom: 1px solid #cbd5e1;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }}
+        .annexure-open-link {{
+            font-size: 8px;
+            color: #8b1e28;
+            font-weight: 700;
+            text-decoration: none;
+        }}
+        .annexure-card-body {{
+            padding: 6px;
+            text-align: center;
+            background: #fafaf9;
+            min-height: 180px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }}
+        .annexure-img-wrapper {{
+            width: 100%;
+            max-height: 240px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }}
+        .annexure-img {{
+            max-width: 100%;
+            max-height: 235px;
+            object-fit: contain;
+            border: 1px solid #e2e8f0;
+        }}
+        .annexure-pdf-frame {{
+            width: 100%;
+            height: 220px;
+            border: 1px solid #cbd5e1;
+        }}
+        .annexure-fallback {{
+            font-size: 8px;
+            color: #475569;
+            margin-top: 4px;
+        }}
+        .annexure-doc-box {{
+            padding: 16px;
+            font-size: 9px;
+            color: #334155;
         }}
 
         @media print {{
+            .no-print {{
+                display: none !important;
+            }}
             body {{
                 background-color: #ffffff;
                 padding: 0;
@@ -3351,12 +3945,18 @@ def generate_professional_school_admission_form_html(forms_list):
                 box-shadow: none;
                 margin: 0;
                 width: 100%;
-                min-height: 100vh;
+                min-height: auto;
             }}
         }}
     </style>
 </head>
-<body onload="window.print()">
+<body>
+    <div class="top-action-bar no-print">
+        <div class="bar-title">🌿 Shreyas Foundation — Official Admission Form &amp; Parental Quiz Result Document</div>
+        <div class="bar-actions">
+            <button class="action-btn primary" onclick="window.print()">🖨️ Print / Save as PDF</button>
+        </div>
+    </div>
     {cards_html}
 </body>
 </html>"""
@@ -3376,43 +3976,150 @@ class PassthroughHtmlRenderer(BaseRenderer):
 
 class AdminPrintPhysicalFormView(APIView):
     """
-    Step 7: Render physical form layout for single application or bulk selected admissions.
-    GET /api/admin/applications/<application_id>/print/?format=html (Opens crisp, professional printable form)
-    GET /api/admin/applications/print-bulk/?standard=1&medium=Gujarati&status=SELECTED&format=html (Bulk print)
+    Step 7: Render or download complete official physical form + quiz result document (HTML / Printable PDF).
+    Supports:
+    - GET /api/admin/applications/<application_id>/print/ (by application_id, application_number, or submission_id)
+    - GET /api/admin/applications/<application_id>/download/ (forces direct document download)
+    - GET /api/admin/applications/download/?application_id=... or ?submission_id=...
+    - GET /api/admin/applications/print-bulk/?standard=1&medium=Gujarati&status=SELECTED
+    Query Params:
+    - ?download=1 or ?download=true : Triggers direct file download (Content-Disposition: attachment)
+    - ?format=json : Returns structured JSON with both form details, quiz breakdown, and rendered HTML
+    - ?token=<JWT> : Allows direct browser link download/print from Admin Panel
     """
     renderer_classes = [JSONRenderer, BrowsableAPIRenderer, PassthroughHtmlRenderer]
+
     def get(self, request, application_id=None):
         denied = enforce_admin_token(request)
         if denied:
             return denied
 
-        if application_id:
-            if str(application_id).isdigit():
-                applications = AdmissionApplication.objects.select_related('evaluator').filter(Q(id=int(application_id)) | Q(application_number=str(application_id)))
+        target_id = (
+            application_id
+            or request.query_params.get("application_id")
+            or request.query_params.get("id")
+            or request.query_params.get("application_number")
+        )
+        submission_id_param = request.query_params.get("submission_id")
+
+        if target_id:
+            if str(target_id).isdigit():
+                applications = AdmissionApplication.objects.select_related('evaluator', 'submission').filter(
+                    Q(id=int(target_id)) | Q(application_number=str(target_id)) | Q(submission_id=int(target_id))
+                )
             else:
-                applications = AdmissionApplication.objects.select_related('evaluator').filter(application_number=str(application_id))
+                applications = AdmissionApplication.objects.select_related('evaluator', 'submission').filter(
+                    application_number__iexact=str(target_id).strip()
+                )
 
             if not applications.exists():
                 return Response({
                     "status": "error",
-                    "message": f"Admission application {application_id} not found."
+                    "message": f"Admission application '{target_id}' not found."
+                }, status=status.HTTP_404_NOT_FOUND)
+        elif submission_id_param:
+            if str(submission_id_param).isdigit():
+                applications = AdmissionApplication.objects.select_related('evaluator', 'submission').filter(
+                    submission_id=int(submission_id_param)
+                )
+            else:
+                applications = AdmissionApplication.objects.none()
+
+            if not applications.exists():
+                return Response({
+                    "status": "error",
+                    "message": f"Admission application for submission_id '{submission_id_param}' not found."
                 }, status=status.HTTP_404_NOT_FOUND)
         else:
             standard = request.query_params.get("standard")
             medium = request.query_params.get("medium")
             app_status = request.query_params.get("status", "SELECTED")
 
-            applications = AdmissionApplication.objects.select_related('evaluator').all()
+            applications = AdmissionApplication.objects.select_related('evaluator', 'submission').all()
             if standard:
                 applications = applications.filter(standard__iexact=standard)
             if medium:
                 applications = applications.filter(medium__iexact=medium)
-            if app_status:
+            if app_status and app_status.lower() != "all":
                 applications = applications.filter(admission_status__iexact=app_status)
             applications = applications.order_by('merit_rank', 'application_number')
 
+        from .evaluation_service import calculate_part_x_score
+
+        # Index QUESTIONNAIRE_QUESTIONS by ID for fast lookup
+        question_lookup = {q["id"]: q for q in QUESTIONNAIRE_QUESTIONS}
+
         forms_data = []
         for app in applications:
+            # Ensure Part X score is calculated and up-to-date
+            if not app.total_part_x_score:
+                calculate_part_x_score(app, save=True)
+
+            sub = app.submission
+            sub_answers = (sub.answers if sub and isinstance(sub.answers, dict) else {}) or {}
+            ai_evals = sub_answers.get("ai_evaluations", {}) if isinstance(sub_answers, dict) else {}
+
+            # Score breakdown for Quiz (MCQs 1-10 and Written 11-14)
+            mcq_questions_data = []
+            mcq_total_earned = 0
+            for q_id in range(1, 11):
+                q_meta = question_lookup.get(q_id, {})
+                sel_key = sub_answers.get(str(q_id)) or sub_answers.get(q_id) or "-"
+                sel_key = str(sel_key).strip().upper()
+                earned = PARENT_MCQ_SCORING_MATRIX.get(q_id, {}).get(sel_key, 0)
+                mcq_total_earned += earned
+
+                sel_opt_obj = next((o for o in q_meta.get("options", []) if o.get("key") == sel_key), None)
+                mcq_questions_data.append({
+                    "id": q_id,
+                    "focus": q_meta.get("focus", ""),
+                    "question_en": q_meta.get("question_en", ""),
+                    "question_gu": q_meta.get("question_gu", ""),
+                    "selected_key": sel_key,
+                    "selected_text_en": sel_opt_obj.get("text_en", "Not Answered") if sel_opt_obj else "Not Answered",
+                    "selected_text_gu": sel_opt_obj.get("text_gu", "") if sel_opt_obj else "",
+                    "earned_marks": earned,
+                    "max_marks": 3,
+                    "best_option": ALIGNED_ANSWERS.get(q_id, "A")
+                })
+
+            written_questions_data = []
+            written_total_earned = 0.0
+            for q_id in [11, 12, 13, 14]:
+                q_meta = question_lookup.get(q_id, {})
+                ans_text = str(sub_answers.get(str(q_id)) or sub_answers.get(q_id) or "").strip()
+                eval_obj = ai_evals.get(str(q_id)) or ai_evals.get(q_id) or {}
+                w_score = float(eval_obj.get("score", 0.0)) if isinstance(eval_obj, dict) else 0.0
+                w_fb = eval_obj.get("feedback", "") if isinstance(eval_obj, dict) else ""
+                written_total_earned += w_score
+
+                written_questions_data.append({
+                    "id": q_id,
+                    "focus": q_meta.get("focus", ""),
+                    "question_en": q_meta.get("question_en", ""),
+                    "question_gu": q_meta.get("question_gu", ""),
+                    "parent_answer": ans_text,
+                    "earned_marks": round(w_score, 1),
+                    "max_marks": 5,
+                    "ai_feedback": w_fb
+                })
+
+            total_quiz_score = sub.score if (sub and sub.score) else round(mcq_total_earned + written_total_earned, 1)
+            if written_total_earned == 0.0 and total_quiz_score > mcq_total_earned:
+                written_total_earned = round(total_quiz_score - mcq_total_earned, 1)
+
+            age_parts = []
+            if app.present_age_year is not None:
+                age_parts.append(f"{app.present_age_year} Y")
+            if app.present_age_month is not None:
+                age_parts.append(f"{app.present_age_month} M")
+            if app.present_age_day is not None:
+                age_parts.append(f"{app.present_age_day} D")
+            age_summary = " ".join(age_parts) if age_parts else "-"
+
+            birth_place_parts = [p for p in [app.birth_place_city, app.birth_place_taluka, app.birth_place_district] if p]
+            birth_place_full = ", ".join(birth_place_parts) if birth_place_parts else "-"
+
             forms_data.append({
                 "school_header": {
                     "trust_name": "Shreyas Foundation",
@@ -3421,8 +4128,10 @@ class AdminPrintPhysicalFormView(APIView):
                     "academic_session": "2026 - 2027"
                 },
                 "form_details": {
+                    "application_id": app.id,
                     "application_number": app.application_number,
-                    "date_of_submission": app.created_at.strftime("%d-%m-%Y") if app.created_at else "-",
+                    "submission_id": sub.id if sub else app.submission_id,
+                    "date_of_submission": (app.form_submitted_at or app.created_at).strftime("%d-%m-%Y") if (app.form_submitted_at or app.created_at) else "-",
                     "vibhag": app.vibhag,
                     "standard": app.standard,
                     "medium": app.medium,
@@ -3431,35 +4140,124 @@ class AdminPrintPhysicalFormView(APIView):
                 },
                 "student_profile": {
                     "first_name": app.child_first_name,
+                    "father_name": app.child_father_name or app.father_name,
                     "surname": app.child_surname,
                     "date_of_birth": str(app.date_of_birth) if app.date_of_birth else "-",
+                    "present_age_year": app.present_age_year,
+                    "present_age_month": app.present_age_month,
+                    "present_age_day": app.present_age_day,
+                    "age_summary": age_summary,
                     "gender": getattr(app, 'child_gender', '-'),
                     "blood_group": getattr(app, 'child_blood_group', '-'),
                     "birth_place": f"{app.birth_place_city or ''} {app.birth_place_district or ''}".strip() or "-",
+                    "birth_place_city": app.birth_place_city,
+                    "birth_place_taluka": app.birth_place_taluka,
+                    "birth_place_district": app.birth_place_district,
+                    "birth_place_full": birth_place_full,
+                    "age_started_talking": app.age_started_talking_year or "-",
+                    "age_started_walking": app.age_started_walking_year or "-",
                     "mother_tongue": app.mother_tongue_mother or app.mother_tongue_father or "-",
+                    "mother_tongue_mother": app.mother_tongue_mother or "-",
+                    "mother_tongue_father": app.mother_tongue_father or "-",
+                    "languages_known": app.languages_known or {},
+                    "height_cm": app.child_height_cm or "-",
+                    "weight_kg": app.child_weight_kg or "-",
+                    "past_illness": app.past_illness or "-",
+                    "specific_care_needed": app.specific_care_needed or "-",
                     "nationality": app.father_nationality or app.mother_nationality or "Indian",
                     "photo_url": app.photograph_child.url if app.photograph_child else None
                 },
                 "parent_profile": {
+                    "has_parents": app.has_parents,
                     "father_name": app.father_name,
+                    "father_father_name": app.father_father_name,
                     "father_surname": app.father_surname,
                     "father_qualification": app.father_education,
                     "father_occupation": app.father_occupation,
                     "father_annual_income": app.father_annual_income,
-                    "father_mobile": app.father_whatsapp,
-                    "father_email": app.father_email,
+                    "father_mobile": app.father_whatsapp or (sub.whatsapp_number if sub else ""),
+                    "father_phone_residence": app.father_phone_residence,
+                    "father_phone_office": app.father_phone_office,
+                    "father_email": app.father_email or (sub.email if sub else ""),
+                    "father_nationality": app.father_nationality or "Indian",
+                    "father_address_residence": app.father_address_residence,
+                    "father_address_office": app.father_address_office,
                     "mother_name": app.mother_name,
+                    "mother_father_or_husband_name": app.mother_father_or_husband_name,
                     "mother_surname": app.mother_surname,
                     "mother_qualification": app.mother_education,
                     "mother_occupation": app.mother_occupation,
                     "mother_annual_income": app.mother_annual_income,
                     "mother_mobile": app.mother_whatsapp,
+                    "mother_phone_residence": app.mother_phone_residence,
+                    "mother_phone_office": app.mother_phone_office,
                     "mother_email": app.mother_email,
+                    "mother_nationality": app.mother_nationality or "Indian",
+                    "mother_address_residence": app.mother_address_residence,
+                    "mother_address_office": app.mother_address_office,
                     "residential_address": app.father_address_residence or app.mother_address_residence or "-",
                     "office_address": app.father_address_office or app.mother_address_office or "-"
                 },
+                "guardian_profile": {
+                    "guardian_name": app.guardian_name,
+                    "guardian_father_name": app.guardian_father_name,
+                    "guardian_surname": app.guardian_surname,
+                    "guardian_education": app.guardian_education,
+                    "guardian_occupation": app.guardian_occupation,
+                    "guardian_annual_income": app.guardian_annual_income,
+                    "guardian_whatsapp": app.guardian_whatsapp,
+                    "guardian_phone_residence": app.guardian_phone_residence,
+                    "guardian_phone_office": app.guardian_phone_office,
+                    "guardian_email": app.guardian_email,
+                    "guardian_nationality": app.guardian_nationality,
+                    "guardian_address_residence": app.guardian_address_residence,
+                    "guardian_address_office": app.guardian_address_office,
+                    "guardians_list": app.guardians or []
+                },
+                "siblings_info": {
+                    "has_sibling_in_shreyas": app.has_sibling_in_shreyas,
+                    "sibling_name": app.sibling_name,
+                    "sibling_class": app.sibling_class,
+                    "vk1_opted": app.sibling_vikas_kendra_1_opted,
+                    "vk1_receipt": app.sibling_vikas_kendra_1_receipt,
+                    "vk2_opted": app.sibling_vikas_kendra_2_opted,
+                    "vk2_receipt": app.sibling_vikas_kendra_2_receipt,
+                    "siblings_list": app.siblings or []
+                },
+                "previous_school": {
+                    "school_name": app.current_school_name or "-",
+                    "school_place": app.current_school_place or "-",
+                    "school_year": app.current_school_year or "-",
+                    "school_std": app.current_school_std or "-",
+                    "school_medium": app.current_school_medium or "-"
+                },
+                "vikas_kendra_activities": {
+                    "vk1": app.vikas_kendra_1_activities or [],
+                    "vk2": app.vikas_kendra_2_activities or [],
+                    "vk3": app.vikas_kendra_3_activities or []
+                },
+                "documents_uploaded": {
+                    "photograph_child": app.photograph_child.url if app.photograph_child else None,
+                    "birth_certificate": app.birth_certificate.url if app.birth_certificate else None,
+                    "child_aadhar_card": app.child_aadhar_card.url if app.child_aadhar_card else None,
+                    "parent_aadhar_card": app.parent_aadhar_card.url if app.parent_aadhar_card else None,
+                    "health_certificate": app.health_certificate.url if app.health_certificate else None,
+                    "eye_checkup_certificate": app.eye_checkup_certificate.url if app.eye_checkup_certificate else None,
+                    "caste_certificate": app.caste_certificate.url if app.caste_certificate else None,
+                    "previous_report_card": app.previous_report_card.url if app.previous_report_card else None,
+                    "alak_malak_certificate": app.alak_malak_certificate.url if app.alak_malak_certificate else None
+                },
+                "interaction_schedule": {
+                    "date": app.interaction_date.strftime("%d-%m-%Y") if app.interaction_date else "-",
+                    "slot_no": app.interaction_slot_no,
+                    "time": app.interaction_time or "-",
+                    "venue": app.interaction_venue or "Shreyas Foundation – Main Office",
+                    "parent_confirmed_slot": app.parent_confirmed_slot
+                },
                 "assessment_scores": {
                     "part_x": {
+                        "has_attended_alak_malak": app.has_attended_alak_malak,
+                        "alak_malak_months": app.alak_malak_months,
                         "alak_malak": app.alak_malak_score,
                         "parent_mcq": app.mcq_score_part_x,
                         "sibling_vk": app.sibling_score,
@@ -3478,11 +4276,26 @@ class AdminPrintPhysicalFormView(APIView):
                     "final_score": app.final_aggregate_score
                 },
                 "signatures_and_declarations": {
+                    "agrees_discourage_private_tuitions": app.agrees_discourage_private_tuitions,
+                    "open_to_natural_medium_schooling": app.open_to_natural_medium_schooling,
                     "agreed_to_rules": app.agreed_to_rules,
                     "terms_agreed_date": str(app.terms_agreed_date) if app.terms_agreed_date else "-",
                     "father_signature_url": app.father_signature.url if app.father_signature else None,
                     "mother_signature_url": app.mother_signature.url if app.mother_signature else None,
                     "guardian_signature_url": app.guardian_signature.url if app.guardian_signature else None
+                },
+                "quiz_result": {
+                    "submission_id": sub.id if sub else None,
+                    "qa_status": sub.qa_status if sub else "PENDING",
+                    "tag": sub.tag if sub else "-",
+                    "is_eligible": sub.is_eligible if sub else False,
+                    "mcq_score": mcq_total_earned,
+                    "written_score": round(written_total_earned, 1),
+                    "total_score": total_quiz_score,
+                    "max_score": 50,
+                    "quiz_completed_at": sub.quiz_completed_at.strftime("%d-%m-%Y %H:%M") if (sub and sub.quiz_completed_at) else "-",
+                    "mcq_questions": mcq_questions_data,
+                    "written_questions": written_questions_data
                 }
             })
 
@@ -3505,9 +4318,7 @@ class AdminPrintPhysicalFormView(APIView):
         assessment_summary_str = f"Part X: {px.get('total_part_x', 0)}/20 | Part Y: {py.get('total_part_y', 0)}/30 | Final Aggregate: {first_sc.get('final_score', 0)}/50"
 
         # Check if caller specifically requested raw JSON
-        # If client explicitly sends Accept: application/json AND does not ask for html, OR query ?format=json
         print_format = (request.query_params.get("format") or request.query_params.get("view") or "").lower().strip()
-        accept_header = request.headers.get('Accept', '').lower()
 
         if print_format == "json":
             return Response({
@@ -3522,8 +4333,21 @@ class AdminPrintPhysicalFormView(APIView):
                 "html": html_content
             }, status=status.HTTP_200_OK)
 
-        # By default for print requests, return the ready-to-print official school admission form!
-        return HttpResponse(html_content, content_type="text/html; charset=utf-8")
+        response = HttpResponse(html_content, content_type="text/html; charset=utf-8")
+
+        # Check if download mode was requested (either via /download/ URL path or ?download=1 query param)
+        is_download = (
+            request.query_params.get("download", "").lower() in ["1", "true", "yes"]
+            or "download" in request.path.lower()
+        )
+        if is_download:
+            app_no_clean = first_fd.get("application_number") or "Bulk"
+            safe_student = re.sub(r"[^A-Za-z0-9_-]+", "_", student_name_str).strip("_") or "Student"
+            filename = f"Admission_And_Quiz_{app_no_clean}_{safe_student}.html"
+            response["Content-Disposition"] = f'attachment; filename="{filename}"'
+            response["Access-Control-Expose-Headers"] = "Content-Disposition"
+
+        return response
 
 
 class AdminAcademicYearRollView(APIView):

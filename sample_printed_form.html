@@ -2,11 +2,11 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Official Admission Form - Shreyas Foundation</title>
+    <title>Official Admission &amp; Quiz Record - Shreyas Foundation</title>
     <style>
         @page {
             size: A4 portrait;
-            margin: 10mm;
+            margin: 8mm;
         }
         * {
             box-sizing: border-box;
@@ -16,14 +16,59 @@
         body {
             font-family: 'Segoe UI', Calibri, Arial, sans-serif;
             margin: 0;
-            padding: 10px;
+            padding: 55px 10px 20px 10px;
             background-color: #f1f5f9;
             color: #1e293b;
         }
+        .top-action-bar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 46px;
+            background: #0f3d2e;
+            color: #ffffff;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 20px;
+            z-index: 9999;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        }
+        .top-action-bar .bar-title {
+            font-size: 13px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+        }
+        .top-action-bar .bar-actions {
+            display: flex;
+            gap: 10px;
+        }
+        .action-btn {
+            background: #ffffff;
+            color: #0f3d2e;
+            border: none;
+            padding: 6px 14px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 700;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .action-btn.primary {
+            background: #fef08a;
+            color: #854d0e;
+        }
+        .action-btn:hover {
+            opacity: 0.92;
+        }
         .admission-sheet {
             width: 210mm;
-            min-height: 285mm;
-            padding: 12mm 14mm;
+            min-height: 282mm;
+            padding: 9mm 11mm;
             margin: 0 auto 15px auto;
             background: #ffffff;
             border: 2px solid #0f3d2e;
@@ -37,61 +82,61 @@
             display: flex;
             align-items: center;
             border-bottom: 2px solid #0f3d2e;
-            padding-bottom: 8px;
-            margin-bottom: 8px;
+            padding-bottom: 6px;
+            margin-bottom: 6px;
         }
         .logo-area {
-            width: 65px;
+            width: 55px;
             text-align: center;
         }
         .school-logo {
-            font-size: 42px;
+            font-size: 36px;
             line-height: 1;
         }
         .header-text {
             flex: 1;
             text-align: center;
-            padding: 0 10px;
+            padding: 0 8px;
         }
         .trust-title {
             margin: 0;
-            font-size: 16px;
+            font-size: 15px;
             font-weight: 800;
-            letter-spacing: 1px;
+            letter-spacing: 0.8px;
             color: #0f3d2e;
         }
         .school-title {
-            margin: 2px 0 0 0;
-            font-size: 20px;
+            margin: 1px 0 0 0;
+            font-size: 18px;
             font-weight: 900;
-            letter-spacing: 1.5px;
+            letter-spacing: 1.2px;
             color: #8b1e28;
         }
         .school-subtitle {
             margin: 2px 0;
-            font-size: 9px;
+            font-size: 8.5px;
             color: #475569;
         }
         .badge-title {
             display: inline-block;
             background-color: #0f3d2e;
             color: #ffffff;
-            font-size: 11px;
+            font-size: 10px;
             font-weight: bold;
-            padding: 3px 12px;
+            padding: 2px 10px;
             border-radius: 3px;
-            margin-top: 3px;
+            margin-top: 2px;
             letter-spacing: 0.5px;
         }
         .academic-year {
-            font-size: 10px;
+            font-size: 9.5px;
             font-weight: bold;
             color: #1e293b;
             margin-top: 2px;
         }
         .photo-container {
-            width: 85px;
-            height: 100px;
+            width: 78px;
+            height: 92px;
             border: 1.5px dashed #0f3d2e;
             display: flex;
             align-items: center;
@@ -100,7 +145,7 @@
             overflow: hidden;
         }
         .photo-placeholder {
-            font-size: 8px;
+            font-size: 7.5px;
             color: #64748b;
             text-align: center;
             padding: 4px;
@@ -114,13 +159,13 @@
         .form-meta-table {
             width: 100%;
             border-collapse: collapse;
-            margin-bottom: 8px;
-            font-size: 10.5px;
+            margin-bottom: 6px;
+            font-size: 9.5px;
             background: #f8fafc;
             border: 1px solid #cbd5e1;
         }
         .form-meta-table td {
-            padding: 4px 6px;
+            padding: 3.5px 6px;
             border: 1px solid #cbd5e1;
         }
         .highlight {
@@ -130,36 +175,37 @@
         .rank-badge {
             background: #fef08a;
             color: #854d0e;
-            padding: 1px 6px;
+            padding: 1px 5px;
             font-weight: bold;
             border-radius: 3px;
         }
         .status-pill {
             background: #dcfce7;
             color: #166534;
-            padding: 1px 6px;
+            padding: 1px 5px;
             font-weight: bold;
             border-radius: 3px;
         }
         .section-title {
             background: #0f3d2e;
             color: #ffffff;
-            font-size: 10.5px;
+            font-size: 9.5px;
             font-weight: bold;
-            padding: 3px 8px;
-            letter-spacing: 0.5px;
-            margin-top: 6px;
+            padding: 2.5px 7px;
+            letter-spacing: 0.4px;
+            margin-top: 5px;
             border-left: 4px solid #8b1e28;
         }
         .grid-table {
             width: 100%;
             border-collapse: collapse;
-            margin-bottom: 6px;
-            font-size: 10px;
+            margin-bottom: 5px;
+            font-size: 9px;
         }
         .grid-table th, .grid-table td {
             border: 1px solid #cbd5e1;
-            padding: 4px 6px;
+            padding: 3px 5px;
+            vertical-align: top;
         }
         .grid-table .lbl {
             background-color: #f8fafc;
@@ -172,89 +218,231 @@
         .grid-table .sub-head th {
             background-color: #f1f5f9;
             color: #0f3d2e;
-            font-size: 9.5px;
+            font-size: 8.8px;
             text-align: center;
             font-weight: 700;
-            padding: 4px;
+            padding: 3px;
         }
         .text-center { text-align: center; }
         .font-semibold { font-weight: 600; }
-        .text-xs { font-size: 9px; }
-        
+        .text-xs { font-size: 8.5px; }
+        .doc-pill {
+            display: inline-block;
+            padding: 1px 5px;
+            margin: 1px 2px;
+            border-radius: 3px;
+            font-size: 8px;
+            font-weight: 600;
+            text-decoration: none;
+        }
+        .doc-ok {
+            background: #dcfce7;
+            color: #166534;
+            border: 1px solid #86efac;
+        }
+        .doc-missing {
+            background: #f1f5f9;
+            color: #64748b;
+            border: 1px solid #cbd5e1;
+        }
+        .q-focus {
+            font-size: 8px;
+            font-weight: 700;
+            color: #8b1e28;
+            text-transform: uppercase;
+            margin-bottom: 1px;
+        }
+        .q-text {
+            font-size: 8.8px;
+            color: #0f172a;
+            line-height: 1.25;
+        }
+        .q-text-gu {
+            font-size: 8.3px;
+            color: #475569;
+            line-height: 1.25;
+            margin-top: 1px;
+        }
+        .q-score-high {
+            background: #dcfce7;
+            color: #166534;
+            font-weight: 700;
+            padding: 1px 5px;
+            border-radius: 3px;
+        }
+        .q-score-mid {
+            background: #fef9c3;
+            color: #854d0e;
+            font-weight: 700;
+            padding: 1px 5px;
+            border-radius: 3px;
+        }
+        .q-score-low {
+            background: #fee2e2;
+            color: #991b1b;
+            font-weight: 700;
+            padding: 1px 5px;
+            border-radius: 3px;
+        }
+        .written-ans-box {
+            white-space: pre-wrap;
+            font-size: 8.8px;
+            color: #0f172a;
+            line-height: 1.3;
+        }
+        .ai-fb-box {
+            font-size: 8.2px;
+            color: #334155;
+            line-height: 1.25;
+            background: #f8fafc;
+            padding: 3px 4px;
+            border-left: 2px solid #0f3d2e;
+        }
         .score-table .total-row td {
             background-color: #f8fafc;
-            border-top: 2px solid #0f3d2e;
+            border-top: 1.5px solid #0f3d2e;
             font-weight: bold;
-            font-size: 10px;
+            font-size: 9.5px;
         }
         .total-lbl { color: #0f3d2e; font-weight: bold; }
-        .total-val { text-align: center; font-weight: bold; color: #8b1e28; font-size: 11px; }
-        
+        .total-val { text-align: center; font-weight: bold; color: #8b1e28; font-size: 10px; }
         .grand-total-row td {
             background-color: #f0fdf4 !important;
-            border-top: 2px solid #16a34a !important;
-            border-bottom: 2px solid #16a34a !important;
+            border-top: 1.5px solid #16a34a !important;
+            border-bottom: 1.5px solid #16a34a !important;
         }
         .grand-lbl {
             font-weight: 900;
             color: #166534;
-            font-size: 11px;
+            font-size: 10px;
             text-align: right;
-            padding-right: 12px;
+            padding-right: 10px;
         }
         .grand-val {
             font-weight: 900;
             color: #166534;
-            font-size: 12px;
+            font-size: 11px;
             text-align: center;
         }
         .declaration-block {
             border: 1px dashed #cbd5e1;
-            padding: 6px 8px;
-            font-size: 8.5px;
+            padding: 4px 7px;
+            font-size: 8px;
             color: #475569;
-            line-height: 1.3;
-            margin-top: 6px;
-            margin-bottom: 14px;
+            line-height: 1.25;
+            margin-top: 4px;
+            margin-bottom: 8px;
             background: #fafaf9;
         }
         .signatures-container {
             display: flex;
             justify-content: space-between;
-            margin-top: 10px;
-            padding-top: 5px;
+            margin-top: 6px;
+            padding-top: 3px;
         }
         .sig-box {
             width: 23%;
             text-align: center;
         }
         .sig-space {
-            height: 35px;
+            height: 28px;
         }
         .sig-img {
-            max-height: 35px;
+            max-height: 28px;
             max-width: 100%;
             display: block;
             margin: 0 auto;
         }
         .sig-line {
             border-top: 1px solid #475569;
-            padding-top: 3px;
-            font-size: 9px;
+            padding-top: 2px;
+            font-size: 8.5px;
             font-weight: 600;
             color: #334155;
         }
         .form-footer {
             display: flex;
             justify-content: space-between;
-            font-size: 8px;
-            color: #94a3b8;
+            font-size: 7.8px;
+            color: #64748b;
             border-top: 1px solid #e2e8f0;
-            padding-top: 4px;
-            margin-top: 15px;
+            padding-top: 3px;
+            margin-top: 8px;
+        }
+        .annexures-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-top: 8px;
+        }
+        .annexure-card {
+            border: 1px solid #cbd5e1;
+            border-radius: 4px;
+            background: #ffffff;
+            overflow: hidden;
+            page-break-inside: avoid;
+            break-inside: avoid;
+        }
+        .annexure-card-header {
+            background: #f1f5f9;
+            color: #0f3d2e;
+            font-size: 9px;
+            padding: 4px 8px;
+            border-bottom: 1px solid #cbd5e1;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .annexure-open-link {
+            font-size: 8px;
+            color: #8b1e28;
+            font-weight: 700;
+            text-decoration: none;
+        }
+        .annexure-card-body {
+            padding: 6px;
+            text-align: center;
+            background: #fafaf9;
+            min-height: 180px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+        .annexure-img-wrapper {
+            width: 100%;
+            max-height: 240px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+        .annexure-img {
+            max-width: 100%;
+            max-height: 235px;
+            object-fit: contain;
+            border: 1px solid #e2e8f0;
+        }
+        .annexure-pdf-frame {
+            width: 100%;
+            height: 220px;
+            border: 1px solid #cbd5e1;
+        }
+        .annexure-fallback {
+            font-size: 8px;
+            color: #475569;
+            margin-top: 4px;
+        }
+        .annexure-doc-box {
+            padding: 16px;
+            font-size: 9px;
+            color: #334155;
         }
 
         @media print {
+            .no-print {
+                display: none !important;
+            }
             body {
                 background-color: #ffffff;
                 padding: 0;
@@ -264,13 +452,20 @@
                 box-shadow: none;
                 margin: 0;
                 width: 100%;
-                min-height: 100vh;
+                min-height: auto;
             }
         }
     </style>
 </head>
-<body onload="window.print()">
+<body>
+    <div class="top-action-bar no-print">
+        <div class="bar-title">🌿 Shreyas Foundation — Official Admission Form &amp; Parental Quiz Result Document</div>
+        <div class="bar-actions">
+            <button class="action-btn primary" onclick="window.print()">🖨️ Print / Save as PDF</button>
+        </div>
+    </div>
     
+        <!-- PAGE 1: OFFICIAL ADMISSION APPLICATION & ASSESSMENT FORM -->
         <div class="admission-sheet ">
             <!-- Header Section -->
             <div class="header-container">
@@ -281,7 +476,7 @@
                     <h1 class="trust-title">SHREYAS FOUNDATION</h1>
                     <h2 class="school-title">VIKAS KENDRA</h2>
                     <p class="school-subtitle">Post Box No. 4070, Near Manekbaug Hall, Ambawadi, Ahmedabad – 380015</p>
-                    <div class="badge-title">OFFICIAL ADMISSION APPLICATION & ASSESSMENT RECORD</div>
+                    <div class="badge-title">OFFICIAL ADMISSION APPLICATION &amp; ASSESSMENT RECORD</div>
                     <div class="academic-year">ACADEMIC SESSION: 2026 - 2027</div>
                 </div>
                 <div class="photo-container">
@@ -292,148 +487,194 @@
             <!-- Meta Strip -->
             <table class="form-meta-table">
                 <tr>
-                    <td style="width: 25%;"><strong>Application No:</strong> <span class="highlight">SF-5E975B18</span></td>
-                    <td style="width: 25%;"><strong>Date of Submission:</strong> 16-11-2026</td>
-                    <td style="width: 25%;"><strong>Standard & Medium:</strong> 1 (Gujarati)</td>
+                    <td style="width: 25%;"><strong>Application No:</strong> <span class="highlight">SF-TEST001</span></td>
+                    <td style="width: 25%;"><strong>Submission ID:</strong> #101 (23-11-2026)</td>
+                    <td style="width: 25%;"><strong>Standard &amp; Medium:</strong> 1 (Gujarati)</td>
                     <td style="width: 25%;"><strong>Vibhag:</strong> Arun</td>
                 </tr>
                 <tr>
                     <td><strong>Merit Rank:</strong> <span class="rank-badge">#1</span></td>
                     <td><strong>Admission Status:</strong> <span class="status-pill">SELECTED</span></td>
-                    <td colspan="2"><strong>Cutoff Qualification:</strong> Eligible for Enrollment</td>
+                    <td><strong>Quiz Result:</strong> <span class="status-pill">45.0/50 (PASSED - Outstanding)</span></td>
+                    <td><strong>Interaction Slot:</strong> 25-11-2026 (9:00 AM TO 10:00 AM)</td>
                 </tr>
             </table>
 
-            <!-- Section 1: Student Information -->
-            <div class="section-title">1. STUDENT PARTICULARS</div>
+            <!-- Section 1: Student Information, Milestones & Health -->
+            <div class="section-title">1. STUDENT PARTICULARS, MILESTONES &amp; HEALTH DETAILS</div>
             <table class="grid-table">
                 <tr>
-                    <td class="lbl" style="width: 20%;">Student's Full Name:</td>
-                    <td colspan="3" class="val" style="font-weight: bold; font-size: 13px;">PranjalJunior Vejani</td>
+                    <td class="lbl" style="width: 18%;">Student's Full Name:</td>
+                    <td class="val" style="width: 32%; font-weight: bold; font-size: 12px;">Aarav Rameshbhai Patel</td>
+                    <td class="lbl" style="width: 18%;">Date of Birth &amp; Age:</td>
+                    <td class="val" style="width: 32%;">2020-05-15 (Age: 6 Y 6 M)</td>
                 </tr>
                 <tr>
-                    <td class="lbl">Date of Birth:</td>
-                    <td class="val" style="width: 30%;">2020-05-15</td>
-                    <td class="lbl" style="width: 20%;">Gender:</td>
-                    <td class="val" style="width: 30%;">-</td>
+                    <td class="lbl">Birth Place (City/Taluka/Dist):</td>
+                    <td class="val">Ahmedabad, City, Ahmedabad</td>
+                    <td class="lbl">Height &amp; Weight:</td>
+                    <td class="val">Height: 115 cm | Weight: 20 kg</td>
                 </tr>
                 <tr>
-                    <td class="lbl">Place of Birth:</td>
-                    <td class="val">Ahmedabad Ahmedabad</td>
-                    <td class="lbl">Blood Group:</td>
-                    <td class="val">-</td>
+                    <td class="lbl">Mother Tongue (M / F):</td>
+                    <td class="val">Mother: Gujarati | Father: Gujarati</td>
+                    <td class="lbl">Developmental Milestones:</td>
+                    <td class="val">Started Talking: 1.2 | Walking: 1.0</td>
                 </tr>
                 <tr>
-                    <td class="lbl">Mother Tongue:</td>
-                    <td class="val">Gujarati</td>
-                    <td class="lbl">Nationality:</td>
-                    <td class="val">Indian</td>
+                    <td class="lbl">Languages Known:</td>
+                    <td colspan="3" class="val">Mother (Gujarati: Read, Write, Speak) | Father (Gujarati: Read, Write, Speak, English: Read, Write, Speak)</td>
+                </tr>
+                <tr>
+                    <td class="lbl">Past Illness / Medical History:</td>
+                    <td class="val">None</td>
+                    <td class="lbl">Specific Care Needed:</td>
+                    <td class="val">None</td>
                 </tr>
             </table>
 
             <!-- Section 2: Family Information -->
-            <div class="section-title">2. PARENTS / GUARDIAN PARTICULARS</div>
+            <div class="section-title">2. PARENTS PARTICULARS (FATHER &amp; MOTHER)</div>
             <table class="grid-table">
                 <thead>
                     <tr class="sub-head">
                         <th style="width: 20%;">Particulars</th>
-                        <th style="width: 40%;">Father / Primary Guardian</th>
-                        <th style="width: 40%;">Mother</th>
+                        <th style="width: 40%;">Father Details</th>
+                        <th style="width: 40%;">Mother Details</th>
                     </tr>
                 </thead>
                 <tbody>
                     <tr>
-                        <td class="lbl">Full Name:</td>
-                        <td class="val font-semibold">Pranjal Vejani</td>
-                        <td class="val font-semibold">Bhavnaben Vejani</td>
+                        <td class="lbl">Full Name (Name / Father / Surname):</td>
+                        <td class="val font-semibold">Rameshbhai Kantibhai Patel</td>
+                        <td class="val font-semibold">Meenaben Rameshbhai Patel</td>
                     </tr>
                     <tr>
                         <td class="lbl">Educational Qualification:</td>
-                        <td class="val">Post Graduate</td>
-                        <td class="val">Graduate</td>
+                        <td class="val">MBA</td>
+                        <td class="val">B.Com</td>
                     </tr>
                     <tr>
-                        <td class="lbl">Occupation & Designation:</td>
-                        <td class="val">Business</td>
-                        <td class="val">Homemaker</td>
+                        <td class="lbl">Occupation &amp; Annual Income:</td>
+                        <td class="val">Business (Income: 12,00,000)</td>
+                        <td class="val">Homemaker (Income: -)</td>
                     </tr>
                     <tr>
-                        <td class="lbl">Annual Income:</td>
-                        <td class="val">12,00,000</td>
-                        <td class="val">-</td>
+                        <td class="lbl">WhatsApp / Residence / Office Phone:</td>
+                        <td class="val">WA: 9876543210 | Res: 079-2660000 | Off: 079-2661111</td>
+                        <td class="val">WA: 9876543211 | Res: - | Off: -</td>
                     </tr>
                     <tr>
-                        <td class="lbl">Mobile / WhatsApp:</td>
-                        <td class="val">7874566064</td>
-                        <td class="val">7874566064</td>
-                    </tr>
-                    <tr>
-                        <td class="lbl">Email Address:</td>
-                        <td class="val">pranjal@shreyas.com</td>
-                        <td class="val">bhavna@example.com</td>
+                        <td class="lbl">Email &amp; Nationality:</td>
+                        <td class="val">ramesh@example.com (Indian)</td>
+                        <td class="val">meena@example.com (Indian)</td>
                     </tr>
                     <tr>
                         <td class="lbl">Residential Address:</td>
-                        <td colspan="2" class="val">101, Shreyas Heights, Ambawadi, Ahmedabad</td>
+                        <td class="val">101, Shreyas Heights, Ambawadi, Ahmedabad</td>
+                        <td class="val">101, Shreyas Heights, Ambawadi, Ahmedabad</td>
+                    </tr>
+                    <tr>
+                        <td class="lbl">Office Address:</td>
+                        <td class="val">CG Road, Ahmedabad</td>
+                        <td class="val">-</td>
                     </tr>
                 </tbody>
             </table>
 
-            <!-- Section 3: Assessment Summary -->
-            <div class="section-title">3. ASSESSMENT & MERIT EVALUATION SCORECARD</div>
+            
+
+            <!-- Section 3: Siblings, Present School, Alak Malak & Vikas Kendra -->
+            <div class="section-title">3. SIBLINGS IN SHREYAS, PREVIOUS SCHOOL &amp; VIKAS KENDRA ACTIVITIES</div>
+            <table class="grid-table">
+                <tr>
+                    <td class="lbl" style="width: 20%;">Siblings in Shreyas:</td>
+                    <td colspan="3" class="val">#1: <strong>Diya Patel</strong> (Class: 4) — VK1: REC-101, VK2: No, VK3: No</td>
+                </tr>
+                <tr>
+                    <td class="lbl">Present / Previous School:</td>
+                    <td class="val" style="width: 30%;">Shreyas Shishu (Ahmedabad)</td>
+                    <td class="lbl" style="width: 20%;">School Std, Medium &amp; Year:</td>
+                    <td class="val" style="width: 30%;">Std: Sr.KG | Med: Gujarati | Year: 2025</td>
+                </tr>
+                <tr>
+                    <td class="lbl">Attended Alak Malak?:</td>
+                    <td class="val">Yes (Duration: 12 Months)</td>
+                    <td class="lbl">Schooling Declarations:</td>
+                    <td class="val">No Private Tuitions: <strong>Yes</strong> | Natural Medium: <strong>Yes</strong></td>
+                </tr>
+                <tr>
+                    <td class="lbl">Vikas Kendra 1 (Opt 5):</td>
+                    <td colspan="3" class="val">Drawing, Music, Clay Work</td>
+                </tr>
+                <tr>
+                    <td class="lbl">Vikas Kendra 2 (Opt 3):</td>
+                    <td class="val">Swimming, Skating</td>
+                    <td class="lbl">Vikas Kendra 3 Activities:</td>
+                    <td class="val">Science Club</td>
+                </tr>
+                <tr>
+                    <td class="lbl">Uploaded Documents:</td>
+                    <td colspan="3" class="val"><a href="https://example.com/photo.jpg" target="_blank" class="doc-pill doc-ok">&#10004; Child Passport Photograph</a> <a href="https://example.com/bc.jpg" target="_blank" class="doc-pill doc-ok">&#10004; Birth Certificate</a> <a href="https://example.com/ca.jpg" target="_blank" class="doc-pill doc-ok">&#10004; Child&#x27;s Aadhar Card</a> <a href="https://example.com/pa.jpg" target="_blank" class="doc-pill doc-ok">&#10004; Parent&#x27;s / Guardian&#x27;s Aadhar Card</a> <a href="https://example.com/hc.pdf" target="_blank" class="doc-pill doc-ok">&#10004; Doctor&#x27;s Health Certificate</a> <span class="doc-pill doc-missing">&#10008; Eye Checkup Certificate</span> <span class="doc-pill doc-missing">&#10008; Caste Certificate</span> <span class="doc-pill doc-missing">&#10008; Previous Year&#x27;s Report Card</span> <span class="doc-pill doc-missing">&#10008; Alak Malak Certificate</span></td>
+                </tr>
+            </table>
+
+            <!-- Section 4: Assessment Summary -->
+            <div class="section-title">4. ASSESSMENT &amp; MERIT EVALUATION SCORECARD</div>
             <table class="grid-table score-table">
                 <thead>
                     <tr class="sub-head">
-                        <th colspan="2">PART X: APPLICATION & BACKGROUND (MAX 20)</th>
+                        <th colspan="2">PART X: APPLICATION &amp; BACKGROUND (MAX 20)</th>
                         <th colspan="2">PART Y: EDUCATOR INTERACTION ASSESSMENT (MAX 30)</th>
                     </tr>
                 </thead>
                 <tbody>
                     <tr>
                         <td class="lbl" style="width: 30%;">Alak Malak Pre-Toddler Bonus:</td>
-                        <td class="val text-center" style="width: 20%; font-weight: bold;">0.0 / 10</td>
-                        <td class="lbl" style="width: 30%;">Cognitive Assessment (5 + 5):</td>
                         <td class="val text-center" style="width: 20%; font-weight: bold;">10.0 / 10</td>
+                        <td class="lbl" style="width: 30%;">Cognitive Assessment (5 + 5):</td>
+                        <td class="val text-center" style="width: 20%; font-weight: bold;">9.5 / 10</td>
                     </tr>
                     <tr>
-                        <td class="lbl">Parent Screening MCQ Score:</td>
-                        <td class="val text-center" style="font-weight: bold;">2.0 / 7</td>
+                        <td class="lbl">Parent Screening MCQ Score (Scaled):</td>
+                        <td class="val text-center" style="font-weight: bold;">6.3 / 7</td>
                         <td class="lbl">Affective Domain Assessment:</td>
-                        <td class="val text-center" style="font-weight: bold;">7.0 / 10</td>
+                        <td class="val text-center" style="font-weight: bold;">9.0 / 10</td>
                     </tr>
                     <tr>
                         <td class="lbl">Sibling Shreyas VK Bonus:</td>
-                        <td class="val text-center" style="font-weight: bold;">0.0 / 3</td>
+                        <td class="val text-center" style="font-weight: bold;">3.0 / 3</td>
                         <td class="lbl">Psychomotor Domain Assessment:</td>
-                        <td class="val text-center" style="font-weight: bold;">10.0 / 10</td>
+                        <td class="val text-center" style="font-weight: bold;">9.0 / 10</td>
                     </tr>
                     <tr>
                         <td class="lbl">Evaluation Observation Tags:</td>
-                        <td class="val text-center text-xs">M: Active & Inquisitive | MI: Visual-Spatial</td>
+                        <td class="val text-center text-xs">M: Active | MI: Visual-Spatial</td>
                         <td class="lbl">Assigned Evaluator:</td>
                         <td class="val text-center text-xs">Kashish Shah</td>
                     </tr>
                     <tr class="total-row">
                         <td class="total-lbl">TOTAL PART X SCORE:</td>
-                        <td class="total-val">2.0 / 20</td>
+                        <td class="total-val">19.3 / 20</td>
                         <td class="total-lbl">TOTAL PART Y SCORE:</td>
-                        <td class="total-val">27.0 / 30</td>
+                        <td class="total-val">27.5 / 30</td>
                     </tr>
                     <tr class="grand-total-row">
                         <td colspan="2" class="grand-lbl">FINAL AGGREGATE MERIT SCORE:</td>
-                        <td colspan="2" class="grand-val">29.0 / 50 Marks (Rank: #1)</td>
+                        <td colspan="2" class="grand-val">46.8 / 50 Marks (Rank: #1)</td>
                     </tr>
                 </tbody>
             </table>
 
-            <!-- Section 4: Declaration & Signatures -->
+            <!-- Section 5: Declaration & Signatures -->
             <div class="declaration-block">
-                <strong>Declaration:</strong> I/We hereby declare that all information furnished in this admission application is true and complete to the best of my/our knowledge. I/We agree to abide by the philosophy, rules, and code of conduct of Shreyas Foundation Vikas Kendra.
+                <strong>Declaration (Agreed to Rules: Yes | Date: 23-11-2026):</strong>
+                I/We hereby declare that all information furnished in this admission application is true and complete to the best of my/our knowledge. I/We agree to abide by the philosophy, rules, and code of conduct of Shreyas Foundation Vikas Kendra.
             </div>
 
             <div class="signatures-container">
                 <div class="sig-box">
-                    <img src="https://shreyasfoundation.blob.core.windows.net/media/signatures/father/father_signature_TzAajFY.png" class="sig-img" />
+                    <div class="sig-space"></div>
                     <div class="sig-line">Father's Signature</div>
                 </div>
                 <div class="sig-box">
@@ -442,7 +683,7 @@
                 </div>
                 <div class="sig-box">
                     <div class="sig-space"></div>
-                    <div class="sig-line">Educator / Evaluator</div>
+                    <div class="sig-line">Guardian's Signature</div>
                 </div>
                 <div class="sig-box">
                     <div class="sig-space"></div>
@@ -452,10 +693,194 @@
 
             <!-- Footer -->
             <div class="form-footer">
-                <div>Document Generated On: 16-11-2026 | Vikas Kendra Admissions Control Center</div>
-                <div>Page 1 of 1</div>
+                <div>Document Generated On: 23-11-2026 | Application No: SF-TEST001</div>
+                <div>Page 1 of 3 (Admission Application Form)</div>
             </div>
         </div>
+
+        <!-- PAGE 2: PARENTAL UNDERSTANDING & PARTNERSHIP QUESTIONNAIRE (QUIZ RESULT) -->
+        <div class="admission-sheet page-break">
+            <div class="header-container" style="padding-bottom: 6px; margin-bottom: 6px;">
+                <div class="logo-area">
+                    <div class="school-logo">🌿</div>
+                </div>
+                <div class="header-text">
+                    <h1 class="trust-title">SHREYAS FOUNDATION — PARENTAL QUESTIONNAIRE &amp; QUIZ RESULT</h1>
+                    <p class="school-subtitle">Student: <strong>Aarav Patel</strong> | App No: <strong>SF-TEST001</strong> | Submission ID: <strong>#101</strong> | Standard: <strong>1 (Gujarati)</strong></p>
+                </div>
+            </div>
+
+            <!-- Quiz Score Summary Bar -->
+            <table class="form-meta-table">
+                <tr>
+                    <td style="width: 20%;"><strong>Quiz Status:</strong> <span class="status-pill">PASSED</span></td>
+                    <td style="width: 20%;"><strong>MCQ Score (Q1-Q10):</strong> <strong>27 / 30</strong></td>
+                    <td style="width: 20%;"><strong>Written Score (Q11-Q14):</strong> <strong>18.0 / 20</strong></td>
+                    <td style="width: 20%;"><strong>Total Quiz Score:</strong> <span class="highlight">45.0 / 50</span></td>
+                    <td style="width: 20%;"><strong>Performance Tag:</strong> <strong>Outstanding</strong></td>
+                </tr>
+            </table>
+
+            <!-- Part A: 10 MCQs Table -->
+            <div class="section-title">PART A: MULTIPLE CHOICE QUESTIONS (10 QUESTIONS × 3 MARKS = 30 MARKS)</div>
+            <table class="grid-table">
+                <thead>
+                    <tr class="sub-head">
+                        <th style="width: 6%;">Q#</th>
+                        <th style="width: 46%;">Question &amp; Assessment Focus</th>
+                        <th style="width: 38%;">Parent's Selected Answer</th>
+                        <th style="width: 10%;">Marks</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    
+            <tr>
+                <td class="text-center font-semibold">Q1</td>
+                <td>
+                    <div class="q-focus">Independence</div>
+                    <div class="q-text">Your child is trying to put on their shoes...</div>
+                    <div class="q-text-gu">તમારું બાળક પોતાના જૂતા પહેરવાનો પ્રયત્ન કરી રહ્યું છે...</div>
+                </td>
+                <td>
+                    <div><strong>Option B:</strong> Let the child try briefly, then offer only the help needed.</div>
+                    <div class="q-text-gu">બાળકને થોડો સમય પ્રયત્ન કરવા દેશો...</div>
+                </td>
+                <td class="text-center"><span class="q-score-high">3 / 3</span></td>
+            </tr>
+            
+                </tbody>
+            </table>
+
+            <!-- Part B: 4 Written Questions Table -->
+            <div class="section-title">PART B: WRITTEN REFLECTION QUESTIONS &amp; AI EVALUATION (4 QUESTIONS × 5 MARKS = 20 MARKS)</div>
+            <table class="grid-table">
+                <thead>
+                    <tr class="sub-head">
+                        <th style="width: 6%;">Q#</th>
+                        <th style="width: 36%;">Question Prompt</th>
+                        <th style="width: 36%;">Parent's Written Response</th>
+                        <th style="width: 22%;">Score &amp; Evaluation Feedback</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    
+            <tr>
+                <td class="text-center font-semibold">Q11</td>
+                <td style="width: 36%;">
+                    <div class="q-focus">Reflection on learning</div>
+                    <div class="q-text">Please describe one recent situation...</div>
+                    <div class="q-text-gu">કૃપા કરીને તાજેતરની એક એવી પરિસ્થિતિનું વર્ણન કરો...</div>
+                </td>
+                <td style="width: 34%;">
+                    <div class="written-ans-box">Aarav tried building a paper boat during rain and learned balance.</div>
+                </td>
+                <td style="width: 22%;">
+                    <div class="font-semibold" style="color: #0f3d2e; margin-bottom: 3px;">Score: 4.5 / 5</div>
+                    <div class="ai-fb-box">Thoughtful observation showing parental restraint and encouragement.</div>
+                </td>
+            </tr>
+            
+                </tbody>
+            </table>
+
+            <div class="form-footer">
+                <div>Quiz Completed At: 23-11-2026 11:30 | Parent WhatsApp: 9876543210</div>
+                <div>Page 2 of 3 (Parental Quiz Result &amp; Evaluation Report)</div>
+            </div>
+        </div>
+        
+        <!-- PAGE 3: UPLOADED DOCUMENTS & CERTIFICATES ANNEXURES -->
+        <div class="admission-sheet page-break">
+            <div class="header-container" style="padding-bottom: 6px; margin-bottom: 6px;">
+                <div class="logo-area">
+                    <div class="school-logo">🌿</div>
+                </div>
+                <div class="header-text">
+                    <h1 class="trust-title">SHREYAS FOUNDATION — UPLOADED DOCUMENTS &amp; CERTIFICATES</h1>
+                    <p class="school-subtitle">Student: <strong>Aarav Patel</strong> | App No: <strong>SF-TEST001</strong> | Submission ID: <strong>#101</strong> | Total Attached Documents: <strong>5</strong></p>
+                </div>
+            </div>
+
+            <div class="section-title">ATTACHED CERTIFICATES, AADHAR CARDS &amp; VERIFICATION DOCUMENTS</div>
+            <div class="annexures-grid">
+                
+                <div class="annexure-card">
+                    <div class="annexure-card-header">
+                        <span><strong>Annexure #1: Child Passport Photograph</strong></span>
+                        <a href="https://example.com/photo.jpg" target="_blank" class="annexure-open-link no-print">Open Original ↗</a>
+                    </div>
+                    <div class="annexure-card-body">
+                        
+                    <div class="annexure-img-wrapper">
+                        <img src="https://example.com/photo.jpg" alt="Child Passport Photograph" class="annexure-img" />
+                    </div>
+                    
+                    </div>
+                </div>
+                
+                <div class="annexure-card">
+                    <div class="annexure-card-header">
+                        <span><strong>Annexure #2: Birth Certificate</strong></span>
+                        <a href="https://example.com/bc.jpg" target="_blank" class="annexure-open-link no-print">Open Original ↗</a>
+                    </div>
+                    <div class="annexure-card-body">
+                        
+                    <div class="annexure-img-wrapper">
+                        <img src="https://example.com/bc.jpg" alt="Birth Certificate" class="annexure-img" />
+                    </div>
+                    
+                    </div>
+                </div>
+                
+                <div class="annexure-card">
+                    <div class="annexure-card-header">
+                        <span><strong>Annexure #3: Child&#x27;s Aadhar Card</strong></span>
+                        <a href="https://example.com/ca.jpg" target="_blank" class="annexure-open-link no-print">Open Original ↗</a>
+                    </div>
+                    <div class="annexure-card-body">
+                        
+                    <div class="annexure-img-wrapper">
+                        <img src="https://example.com/ca.jpg" alt="Child&#x27;s Aadhar Card" class="annexure-img" />
+                    </div>
+                    
+                    </div>
+                </div>
+                
+                <div class="annexure-card">
+                    <div class="annexure-card-header">
+                        <span><strong>Annexure #4: Parent&#x27;s / Guardian&#x27;s Aadhar Card</strong></span>
+                        <a href="https://example.com/pa.jpg" target="_blank" class="annexure-open-link no-print">Open Original ↗</a>
+                    </div>
+                    <div class="annexure-card-body">
+                        
+                    <div class="annexure-img-wrapper">
+                        <img src="https://example.com/pa.jpg" alt="Parent&#x27;s / Guardian&#x27;s Aadhar Card" class="annexure-img" />
+                    </div>
+                    
+                    </div>
+                </div>
+                
+                <div class="annexure-card">
+                    <div class="annexure-card-header">
+                        <span><strong>Annexure #5: Doctor&#x27;s Health Certificate</strong></span>
+                        <a href="https://example.com/hc.pdf" target="_blank" class="annexure-open-link no-print">Open Original ↗</a>
+                    </div>
+                    <div class="annexure-card-body">
+                        
+                    <iframe src="https://example.com/hc.pdf" class="annexure-pdf-frame" title="Doctor&#x27;s Health Certificate"></iframe>
+                    <div class="annexure-fallback">PDF Document Attached — <a href="https://example.com/hc.pdf" target="_blank">Click here to open full PDF (Doctor&#x27;s Health Certificate)</a></div>
+                    
+                    </div>
+                </div>
+                
+            </div>
+
+            <div class="form-footer">
+                <div>Application No: SF-TEST001 | Student: Aarav Patel</div>
+                <div>Page 3 of 3 (Uploaded Documents &amp; Certificates Annexures)</div>
+            </div>
+        </div>
+            
         
 </body>
 </html>

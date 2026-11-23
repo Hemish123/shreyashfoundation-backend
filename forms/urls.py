@@ -44,8 +44,10 @@ urlpatterns = [
     path('admin/merit-board/', AdminMeritBoardView.as_view(), name='admin-merit-board'),
     path('admin/merit-board/cancel/<int:application_id>/', AdminMeritCancellationView.as_view(), name='admin-merit-cancel'),
 
-    # Step 7: Print Physical Form Layout
-    path('admin/applications/<int:application_id>/print/', AdminPrintPhysicalFormView.as_view(), name='admin-print-application'),
+    # Step 7: Print & Download Physical Form + Quiz Result Document
+    path('admin/applications/<str:application_id>/print/', AdminPrintPhysicalFormView.as_view(), name='admin-print-application'),
+    path('admin/applications/<str:application_id>/download/', AdminPrintPhysicalFormView.as_view(), name='admin-download-application'),
+    path('admin/applications/download/', AdminPrintPhysicalFormView.as_view(), name='admin-download-application-query'),
     path('admin/applications/print-bulk/', AdminPrintPhysicalFormView.as_view(), name='admin-print-bulk'),
 
     # Step 8: Academic Year Archival & Rollover
