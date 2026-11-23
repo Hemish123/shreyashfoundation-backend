@@ -3333,54 +3333,7 @@ def generate_professional_school_admission_form_html(forms_list):
                 </tr>
             </table>
 
-            <!-- Section 4: Assessment Summary -->
-            <div class="section-title">4. ASSESSMENT &amp; MERIT EVALUATION SCORECARD</div>
-            <table class="grid-table score-table">
-                <thead>
-                    <tr class="sub-head">
-                        <th colspan="2">PART X: APPLICATION &amp; BACKGROUND (MAX 20)</th>
-                        <th colspan="2">PART Y: EDUCATOR INTERACTION ASSESSMENT (MAX 30)</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td class="lbl" style="width: 30%;">Alak Malak Pre-Toddler Bonus:</td>
-                        <td class="val text-center" style="width: 20%; font-weight: bold;">{px.get('alak_malak', 0)} / 10</td>
-                        <td class="lbl" style="width: 30%;">Cognitive Assessment (5 + 5):</td>
-                        <td class="val text-center" style="width: 20%; font-weight: bold;">{(py.get('cognitive_1') or 0) + (py.get('cognitive_2') or 0)} / 10</td>
-                    </tr>
-                    <tr>
-                        <td class="lbl">Parent Screening MCQ Score (Scaled):</td>
-                        <td class="val text-center" style="font-weight: bold;">{px.get('parent_mcq', 0)} / 7</td>
-                        <td class="lbl">Affective Domain Assessment:</td>
-                        <td class="val text-center" style="font-weight: bold;">{py.get('affective', 0)} / 10</td>
-                    </tr>
-                    <tr>
-                        <td class="lbl">Sibling Shreyas VK Bonus:</td>
-                        <td class="val text-center" style="font-weight: bold;">{px.get('sibling_vk', 0)} / 3</td>
-                        <td class="lbl">Psychomotor Domain Assessment:</td>
-                        <td class="val text-center" style="font-weight: bold;">{py.get('psychomotor', 0)} / 10</td>
-                    </tr>
-                    <tr>
-                        <td class="lbl">Evaluation Observation Tags:</td>
-                        <td class="val text-center text-xs">M: {esc(py.get('m_category'))} | MI: {esc(py.get('mi_category'))}</td>
-                        <td class="lbl">Assigned Evaluator:</td>
-                        <td class="val text-center text-xs">{esc(py.get('evaluator') or 'Admissions Board')}</td>
-                    </tr>
-                    <tr class="total-row">
-                        <td class="total-lbl">TOTAL PART X SCORE:</td>
-                        <td class="total-val">{px.get('total_part_x', 0)} / 20</td>
-                        <td class="total-lbl">TOTAL PART Y SCORE:</td>
-                        <td class="total-val">{py.get('total_part_y', 0)} / 30</td>
-                    </tr>
-                    <tr class="grand-total-row">
-                        <td colspan="2" class="grand-lbl">FINAL AGGREGATE MERIT SCORE:</td>
-                        <td colspan="2" class="grand-val">{scores.get('final_score', 0)} / 50 Marks (Rank: #{esc(fd.get('merit_rank'))})</td>
-                    </tr>
-                </tbody>
-            </table>
-
-            <!-- Section 5: Declaration & Signatures -->
+            <!-- Section 4: Declaration & Signatures -->
             <div class="declaration-block">
                 <strong>Declaration (Agreed to Rules: {"Yes" if sigs.get("agreed_to_rules") else "No"} | Date: {esc(sigs.get("terms_agreed_date"))}):</strong>
                 I/We hereby declare that all information furnished in this admission application is true and complete to the best of my/our knowledge. I/We agree to abide by the philosophy, rules, and code of conduct of Shreyas Foundation Vikas Kendra.
