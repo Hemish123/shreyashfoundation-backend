@@ -3043,8 +3043,15 @@ def generate_professional_school_admission_form_html(forms_list):
             return default
         return html_lib.escape(str(val))
 
-    shreyas_logo_url = _sign_azure_blob_url_if_needed("https://shreyasfoundation.blob.core.windows.net/media/shreyas_logo.png")
+    shreyas_logo_url, _, _ = _fetch_file_as_data_uri("https://shreyasfoundation.blob.core.windows.net/media/shreyas_logo.png")
     logo_img_html = f'<img src="{shreyas_logo_url}" alt="Shreyas Foundation Logo" class="school-logo-img" />'
+
+    first_item = forms_list[0] if forms_list else {}
+    first_fd_meta = first_item.get("form_details", {})
+    first_sp_meta = first_item.get("student_profile", {})
+    app_no_for_file = first_fd_meta.get("application_number") or "Bulk"
+    student_for_file = re.sub(r"[^A-Za-z0-9_-]+", "_", f"{first_sp_meta.get('first_name', '')}_{first_sp_meta.get('surname', '')}").strip("_") or "Student"
+    pdf_filename = f"Admission_And_Quiz_{app_no_for_file}_{student_for_file}.pdf"
 
     cards_html = ""
     for idx, item in enumerate(forms_list):
@@ -3975,75 +3982,149 @@ def generate_professional_school_admission_form_html(forms_list):
         }}
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 </head>
-<body>
+<body data-pdf-filename="{pdf_filename}">
     <div class="top-action-bar no-print">
         <div class="bar-title"><img src="{shreyas_logo_url}" alt="Logo" class="top-bar-logo" /> Shreyas Foundation — Official Admission Form &amp; Parental Quiz Result Document</div>
         <div class="bar-actions">
-            <button class="action-btn primary" onclick="window.print()">🖨️ Print / Save as PDF</button>
+            <button class="action-btn primary" id="btn-download-pdf" onclick="window.downloadTruePdfFile()">📥 Download PDF</button>
+            <button class="action-btn" onclick="window.print()">🖨️ Print</button>
         </div>
+    </div>
+    <div id="pdf-generation-toast" class="no-print" style="position:fixed; bottom:20px; right:20px; background:#0f3d2e; color:#fff; padding:12px 20px; border-radius:8px; font-size:13px; font-weight:700; box-shadow:0 4px 14px rgba(0,0,0,0.25); z-index:10000; display:flex; align-items:center; gap:10px;">
+        <span>⏳ Preparing &amp; downloading PDF file...</span>
     </div>
     {cards_html}
     <script>
-        // Render any attached PDF documents into static, non-scrollable A4 canvas images so they print 100% cleanly without scrollbars
-        // Works both on http:// and when opened as a downloaded local file (file:///C:/Users/.../Downloads/...html) using inline Base64 bytes!
+        // 1. Render any attached PDF documents into static, non-scrollable A4 canvas images
+        // 2. Automatically generate and download a real .pdf file (Admission_And_Quiz_SF-XXXX_Name.pdf)
         document.addEventListener("DOMContentLoaded", function () {{
-            if (!window.pdfjsLib) return;
-            window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-
             function renderPdfDocToContainer(pdfDoc, container) {{
                 container.innerHTML = "";
+                var pagePromises = [];
                 for (var pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {{
                     (function (pNum) {{
-                        pdfDoc.getPage(pNum).then(function (page) {{
+                        var p = pdfDoc.getPage(pNum).then(function (page) {{
                             var viewport = page.getViewport({{ scale: 2.0 }});
                             var canvas = document.createElement("canvas");
                             var ctx = canvas.getContext("2d");
                             canvas.width = viewport.width;
                             canvas.height = viewport.height;
-                            page.render({{ canvasContext: ctx, viewport: viewport }}).promise.then(function () {{
+                            return page.render({{ canvasContext: ctx, viewport: viewport }}).promise.then(function () {{
                                 var img = document.createElement("img");
                                 img.src = canvas.toDataURL("image/png");
                                 img.className = "pdf-page-img";
                                 container.appendChild(img);
                             }});
                         }});
+                        pagePromises.push(p);
                     }})(pageNum);
                 }}
+                return Promise.all(pagePromises);
             }}
 
-            var containers = document.querySelectorAll(".pdf-canvas-list");
-            containers.forEach(function (container) {{
-                var pdfB64 = container.getAttribute("data-pdf-b64");
-                var pdfUrl = container.getAttribute("data-pdf-url");
+            var allPdfPromises = [];
+            if (window.pdfjsLib) {{
+                window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+                var containers = document.querySelectorAll(".pdf-canvas-list");
+                containers.forEach(function (container) {{
+                    var pdfB64 = container.getAttribute("data-pdf-b64");
+                    var pdfUrl = container.getAttribute("data-pdf-url");
 
-                // 1. Primary: Render directly from embedded Base64 bytes (Zero network/CORS issues even on local file://)
-                if (pdfB64 && pdfB64.length > 10) {{
-                    try {{
-                        var raw = window.atob(pdfB64);
-                        var uint8Array = new Uint8Array(raw.length);
-                        for (var i = 0; i < raw.length; i++) {{
-                            uint8Array[i] = raw.charCodeAt(i);
+                    if (pdfB64 && pdfB64.length > 10) {{
+                        try {{
+                            var raw = window.atob(pdfB64);
+                            var uint8Array = new Uint8Array(raw.length);
+                            for (var i = 0; i < raw.length; i++) {{
+                                uint8Array[i] = raw.charCodeAt(i);
+                            }}
+                            var p = window.pdfjsLib.getDocument({{ data: uint8Array }}).promise.then(function (pdfDoc) {{
+                                return renderPdfDocToContainer(pdfDoc, container);
+                            }}).catch(function (err) {{
+                                console.error("PDF.js base64 render error:", err);
+                            }});
+                            allPdfPromises.push(p);
+                            return;
+                        }} catch (e) {{
+                            console.error("Base64 decode error:", e);
                         }}
-                        window.pdfjsLib.getDocument({{ data: uint8Array }}).promise.then(function (pdfDoc) {{
-                            renderPdfDocToContainer(pdfDoc, container);
-                        }}).catch(function (err) {{
-                            console.error("PDF.js base64 render error:", err);
-                        }});
-                        return;
-                    }} catch (e) {{
-                        console.error("Base64 decode error:", e);
                     }}
-                }}
 
-                // 2. Fallback: Load from URL if Base64 was not available
-                if (pdfUrl) {{
-                    window.pdfjsLib.getDocument(pdfUrl).promise.then(function (pdfDoc) {{
-                        renderPdfDocToContainer(pdfDoc, container);
-                    }}).catch(function () {{
-                        container.innerHTML = '<div class="pdf-loading-msg">Unable to preview PDF offline.</div>';
-                    }});
+                    if (pdfUrl) {{
+                        var p2 = window.pdfjsLib.getDocument(pdfUrl).promise.then(function (pdfDoc) {{
+                            return renderPdfDocToContainer(pdfDoc, container);
+                        }}).catch(function () {{
+                            container.innerHTML = '<div class="pdf-loading-msg">Unable to preview PDF offline.</div>';
+                        }});
+                        allPdfPromises.push(p2);
+                    }}
+                }});
+            }}
+
+            window.downloadTruePdfFile = async function () {{
+                var toast = document.getElementById("pdf-generation-toast");
+                var btn = document.getElementById("btn-download-pdf");
+                if (toast) {{
+                    toast.style.display = "flex";
+                    toast.innerHTML = "<span>⏳ Generating high-quality PDF document...</span>";
                 }}
+                if (btn) btn.disabled = true;
+
+                try {{
+                    var sheets = document.querySelectorAll(".admission-sheet");
+                    var jsPDF = window.jspdf.jsPDF;
+                    var pdf = new jsPDF({{ orientation: "portrait", unit: "mm", format: "a4", compress: true }});
+
+                    for (var i = 0; i < sheets.length; i++) {{
+                        var sheet = sheets[i];
+                        var canvas = await window.html2canvas(sheet, {{
+                            scale: 2,
+                            useCORS: true,
+                            allowTaint: true,
+                            backgroundColor: "#ffffff",
+                            logging: false
+                        }});
+                        var imgData = canvas.toDataURL("image/jpeg", 0.95);
+                        var pdfWidth = 210;
+                        var pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+                        if (pdfHeight > 297) pdfHeight = 297;
+
+                        if (i > 0) {{
+                            pdf.addPage();
+                        }}
+                        pdf.addImage(imgData, "JPEG", 0, 0, pdfWidth, pdfHeight, undefined, "FAST");
+                    }}
+
+                    var filename = document.body.getAttribute("data-pdf-filename") || "Admission_And_Quiz_Form.pdf";
+                    pdf.save(filename);
+
+                    if (toast) {{
+                        toast.style.background = "#166534";
+                        toast.innerHTML = "<span>✅ PDF Downloaded (" + filename + ")</span>";
+                        setTimeout(function () {{ toast.style.display = "none"; }}, 4000);
+                    }}
+                }} catch (err) {{
+                    console.error("PDF generation failed, falling back to print dialog:", err);
+                    if (toast) toast.style.display = "none";
+                    window.print();
+                }} finally {{
+                    if (btn) btn.disabled = false;
+                }}
+            }};
+
+            // Wait for all embedded PDFs and images to finish rendering, then auto-download the .pdf file!
+            Promise.all(allPdfPromises).then(function () {{
+                setTimeout(function () {{
+                    var params = new URLSearchParams(window.location.search);
+                    if (params.get("no_auto_pdf") !== "1") {{
+                        window.downloadTruePdfFile();
+                    }} else {{
+                        var toast = document.getElementById("pdf-generation-toast");
+                        if (toast) toast.style.display = "none";
+                    }}
+                }}, 600);
             }});
         }});
     </script>
@@ -4481,16 +4562,9 @@ class AdminPrintPhysicalFormView(APIView):
                 "html": html_content
             }, status=status.HTTP_200_OK)
 
+        # Serve directly over HTTP(S) so the page URL remains https://.../api/admin/applications/...
+        # and automatically downloads the real .pdf file (Admission_And_Quiz_SF-XXXX_StudentName.pdf)!
         response = HttpResponse(html_content, content_type="text/html; charset=utf-8")
-
-        # Direct File Download immediately when any of the print/download document APIs are hit
-        # (Note: /api/admission-form/?submission_id=195 remains completely untouched as JSON / frontend form view)
-        app_no_clean = first_fd.get("application_number") or "Bulk"
-        safe_student = re.sub(r"[^A-Za-z0-9_-]+", "_", student_name_str).strip("_") or "Student"
-        filename = f"Admission_And_Quiz_{app_no_clean}_{safe_student}.html"
-        response["Content-Disposition"] = f'attachment; filename="{filename}"'
-        response["Access-Control-Expose-Headers"] = "Content-Disposition"
-
         return response
 
 
