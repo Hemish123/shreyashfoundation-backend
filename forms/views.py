@@ -649,6 +649,8 @@ class AdminInteractionCalendarView(APIView):
 
         filter_date_str = request.query_params.get("date")
         filter_slot_param = request.query_params.get("slot") or request.query_params.get("slot_no")
+        search_query = (request.query_params.get("search") or request.query_params.get("q") or "").strip()
+
         queryset = AdmissionApplication.objects.filter(
             interaction_date__isnull=False
         ).select_related('submission').order_by('interaction_date', 'interaction_slot_no', 'created_at')
@@ -658,6 +660,24 @@ class AdminInteractionCalendarView(APIView):
 
         if filter_slot_param and str(filter_slot_param).strip().isdigit():
             queryset = queryset.filter(interaction_slot_no=int(filter_slot_param))
+
+        # Global Search filter for child name, parent name, submission ID, application no, and whatsapp/phone
+        if search_query:
+            clean_digits = re.sub(r"\D", "", search_query)
+            search_cond = (
+                Q(child_first_name__icontains=search_query) |
+                Q(child_surname__icontains=search_query) |
+                Q(father_name__icontains=search_query) |
+                Q(mother_name__icontains=search_query) |
+                Q(application_number__icontains=search_query) |
+                Q(father_whatsapp__icontains=search_query) |
+                Q(mother_whatsapp__icontains=search_query)
+            )
+            if clean_digits:
+                search_cond |= Q(father_whatsapp__icontains=clean_digits) | Q(submission__whatsapp_number__icontains=clean_digits)
+            if search_query.isdigit():
+                search_cond |= Q(submission_id=int(search_query)) | Q(id=int(search_query))
+            queryset = queryset.filter(search_cond)
 
         # Group day-wise & slot-wise for the Calendar UI
         calendar_data = {}
@@ -3135,16 +3155,14 @@ class AdminMeritBoardView(APIView):
         cutoff_seats = int(request.query_params.get("cutoff") or 80)
         recompute = request.query_params.get("recompute", "true").lower() in ["true", "1", "yes"]
 
+        # Additional UI Filter Parameters (Status & Global Search)
+        status_filter = (request.query_params.get("status") or "").strip().upper()
+        search_query = (request.query_params.get("search") or request.query_params.get("q") or "").strip()
+
         # If specific standard and medium provided, recompute for that slice
         if standard and medium and not standard.lower().startswith("all") and not medium.lower().startswith("all"):
             if recompute:
-                summary = recompute_merit_rank_and_cutoff(standard=standard, medium=medium, cutoff_seats=cutoff_seats)
-            else:
-                summary = {
-                    "standard": standard,
-                    "medium": medium,
-                    "cutoff_seats": cutoff_seats
-                }
+                recompute_summary = recompute_merit_rank_and_cutoff(standard=standard, medium=medium, cutoff_seats=cutoff_seats)
             ranked_apps = AdmissionApplication.objects.select_related('submission').filter(
                 standard__iexact=standard,
                 medium__iexact=medium
@@ -3152,32 +3170,53 @@ class AdminMeritBoardView(APIView):
         else:
             # If "All Standards" or "All Mediums" is selected, rank across all standard x medium pairs
             all_pairs = AdmissionApplication.objects.values_list('standard', 'medium').distinct()
-            summaries = []
             if recompute:
-                # Rank candidates dynamically by score descending
                 for std_val, med_val in all_pairs:
                     if std_val and med_val:
-                        s = recompute_merit_rank_and_cutoff(standard=std_val, medium=med_val, cutoff_seats=cutoff_seats)
-                        summaries.append(s)
+                        recompute_merit_rank_and_cutoff(standard=std_val, medium=med_val, cutoff_seats=cutoff_seats)
             
             ranked_apps = AdmissionApplication.objects.select_related('submission').exclude(
                 admission_status__in=['CANCELLED', 'REJECTED']
             ).order_by('-final_aggregate_score', 'merit_rank', 'created_at')
 
-            summary_counts = ranked_apps.aggregate(
-                total_ranked=Count('id'),
-                selected_seats=Count(Case(When(admission_status='SELECTED', then=1), output_field=IntegerField())),
-                waitlisted=Count(Case(When(admission_status='WAITLISTED', then=1), output_field=IntegerField()))
-            )
+        # Compute accurate 4-Card Summary metrics BEFORE search/status filtering
+        summary_counts = ranked_apps.aggregate(
+            total_ranked=Count('id'),
+            selected_seats=Count(Case(When(admission_status='SELECTED', then=1), output_field=IntegerField())),
+            waitlisted=Count(Case(When(admission_status='WAITLISTED', then=1), output_field=IntegerField()))
+        )
 
-            summary = {
-                "standard": standard or "All Standards",
-                "medium": medium or "All Mediums",
-                "total_ranked": summary_counts['total_ranked'] or 0,
-                "selected_seats": summary_counts['selected_seats'] or 0,
-                "waitlisted": summary_counts['waitlisted'] or 0,
-                "cutoff_seats": cutoff_seats
-            }
+        summary = {
+            "standard": standard or "All Standards",
+            "medium": medium or "All Mediums",
+            "total_ranked": summary_counts['total_ranked'] or 0,
+            "selected_seats": summary_counts['selected_seats'] or 0,
+            "waitlisted": summary_counts['waitlisted'] or 0,
+            "cutoff_seats": cutoff_seats,
+            "cutoff_quota": cutoff_seats
+        }
+
+        # Apply Status Filter if provided (e.g. SELECTED, WAITLISTED)
+        if status_filter and status_filter != "ALL":
+            ranked_apps = ranked_apps.filter(admission_status__iexact=status_filter)
+
+        # Apply Global Search (matches Student Name, Parent Name, Submission ID, Application No, Phone)
+        if search_query:
+            clean_digits = re.sub(r"\D", "", search_query)
+            search_cond = (
+                Q(child_first_name__icontains=search_query) |
+                Q(child_surname__icontains=search_query) |
+                Q(father_name__icontains=search_query) |
+                Q(mother_name__icontains=search_query) |
+                Q(application_number__icontains=search_query) |
+                Q(father_whatsapp__icontains=search_query) |
+                Q(mother_whatsapp__icontains=search_query)
+            )
+            if clean_digits:
+                search_cond |= Q(father_whatsapp__icontains=clean_digits) | Q(submission__whatsapp_number__icontains=clean_digits)
+            if search_query.isdigit():
+                search_cond |= Q(submission_id=int(search_query)) | Q(id=int(search_query))
+            ranked_apps = ranked_apps.filter(search_cond)
 
         # Pagination support (default page 1, 50 applicants per page)
         total_applicants = ranked_apps.count()
