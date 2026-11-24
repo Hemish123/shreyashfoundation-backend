@@ -722,8 +722,8 @@ class AdminInteractionCalendarView(APIView):
             cell_border = Border(left=border_thin, right=border_thin, top=border_thin, bottom=border_thin)
             data_font = Font(name="Calibri", size=10)
 
-            # Row 1: Title (Centered across columns A to K)
-            ws.merge_cells("A1:K1")
+            # Row 1: Title (Centered across columns A to L)
+            ws.merge_cells("A1:L1")
             title_cell = ws.cell(row=1, column=1, value="PARAMETERS OF ASSESSMENT – PART Y")
             title_cell.font = title_font
             title_cell.alignment = Alignment(horizontal="center", vertical="center")
@@ -738,58 +738,57 @@ class AdminInteractionCalendarView(APIView):
                 subtitle_parts.append(f"Slot: {filter_slot_param}")
             subtitle_text = " | ".join(subtitle_parts) if subtitle_parts else "Date: All Dates"
 
-            ws.merge_cells("A2:K2")
+            ws.merge_cells("A2:L2")
             sub_cell = ws.cell(row=2, column=1, value=subtitle_text)
             sub_cell.font = sub_font
             sub_cell.alignment = Alignment(horizontal="left", vertical="center")
             ws.row_dimensions[2].height = 22
 
             # Two-tier Headers at Row 3 & Row 4
-            # (Interaction Date column removed as requested, now 11 columns A to K)
-            # Row 3: Main Headers
-            # Row 4: Sub-headers / Individual Marks (Cognitive 5, 5; Affective 10; Psychomotor 10; Total 30)
+            # (Columns: Sr. No., Admission Form No., Application No., Slot No, Slot Time, M, MI, Cognitive, Affective, Psychomotor, Total)
             headers_r3 = [
                 ("A", "Sr. No.", True),
                 ("B", "Admission Form No.", True),
-                ("C", "Slot No", True),
-                ("D", "Slot Time", True),
-                ("E", "M", True),
-                ("F", "MI", True),
-                ("G:H", "Cognitive Assessment", False),
-                ("I", "Affective Assessment", False),
-                ("J", "Psychomotor Assessment", False),
-                ("K", "Total", False),
+                ("C", "Application No.", True),
+                ("D", "Slot No", True),
+                ("E", "Slot Time", True),
+                ("F", "M", True),
+                ("G", "MI", True),
+                ("H:I", "Cognitive Assessment", False),
+                ("J", "Affective Assessment", False),
+                ("K", "Psychomotor Assessment", False),
+                ("L", "Total", False),
             ]
 
-            # Merge vertical for columns A to F (Row 3 to 4)
+            # Merge vertical for columns A to G (Row 3 to 4)
             for col_letter, text, is_vert_merged in headers_r3:
                 if is_vert_merged:
                     ws.merge_cells(f"{col_letter}3:{col_letter}4")
                     cell = ws[f"{col_letter}3"]
                     cell.value = text
-                elif col_letter == "G:H":
-                    ws.merge_cells("G3:H3")
-                    ws["G3"] = text
-                elif col_letter == "I":
-                    ws["I3"] = text
+                elif col_letter == "H:I":
+                    ws.merge_cells("H3:I3")
+                    ws["H3"] = text
                 elif col_letter == "J":
                     ws["J3"] = text
                 elif col_letter == "K":
                     ws["K3"] = text
+                elif col_letter == "L":
+                    ws["L3"] = text
 
             # Row 4 marks values
-            ws["G4"] = 5
             ws["H4"] = 5
-            ws["I4"] = 10
+            ws["I4"] = 5
             ws["J4"] = 10
-            ws["K4"] = 30
+            ws["K4"] = 10
+            ws["L4"] = 30
 
             ws.row_dimensions[3].height = 24
             ws.row_dimensions[4].height = 20
 
             # Apply borders and styling to Header Rows (3 and 4)
             for r in [3, 4]:
-                for c in range(1, 12):
+                for c in range(1, 13):
                     cell = ws.cell(row=r, column=c)
                     cell.font = header_font
                     cell.fill = header_fill
@@ -801,7 +800,8 @@ class AdminInteractionCalendarView(APIView):
             for idx, app in enumerate(queryset, start=1):
                 slot_no_val = app.interaction_slot_no if app.interaction_slot_no else "-"
                 slot_time_val = app.interaction_time or "-"
-                sub_id_val = str(app.submission.id) if app.submission else (str(app.submission_id) if app.submission_id else (app.application_number or "-"))
+                sub_id_val = str(app.submission.id) if app.submission else (str(app.submission_id) if app.submission_id else "-")
+                app_no_val = str(app.application_number or f"SF_{app.id}")
 
                 m_val = app.evaluator_m or ""
                 mi_val = app.evaluator_mi or ""
@@ -814,6 +814,7 @@ class AdminInteractionCalendarView(APIView):
                 row_values = [
                     idx,
                     sub_id_val,
+                    app_no_val,
                     slot_no_val,
                     slot_time_val,
                     m_val,
@@ -827,7 +828,7 @@ class AdminInteractionCalendarView(APIView):
 
                 ws.append(row_values)
                 ws.row_dimensions[current_row].height = 22
-                for col_idx in range(1, 12):
+                for col_idx in range(1, 13):
                     cell = ws.cell(row=current_row, column=col_idx)
                     cell.font = data_font
                     cell.border = cell_border
@@ -838,7 +839,7 @@ class AdminInteractionCalendarView(APIView):
             # Column width settings (Safe with merged cells in openpyxl)
             from openpyxl.utils import get_column_letter
 
-            for col_idx in range(1, 12):
+            for col_idx in range(1, 13):
                 col_letter = get_column_letter(col_idx)
                 max_len = 0
                 for r in range(5, current_row):
@@ -847,9 +848,10 @@ class AdminInteractionCalendarView(APIView):
                 ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
 
             ws.column_dimensions["A"].width = 8   # Sr. No.
-            ws.column_dimensions["B"].width = 20  # Admission Form No.
-            ws.column_dimensions["C"].width = 10  # Slot No
-            ws.column_dimensions["D"].width = 24  # Slot Time
+            ws.column_dimensions["B"].width = 20  # Admission Form No. (submission_id)
+            ws.column_dimensions["C"].width = 18  # Application No.
+            ws.column_dimensions["D"].width = 10  # Slot No
+            ws.column_dimensions["E"].width = 24  # Slot Time
 
             response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
             response['Content-Disposition'] = f'attachment; filename="{filename}.xlsx"'
@@ -1012,7 +1014,7 @@ class AdminExportDataView(APIView):
             cell_border = Border(left=border_thin, right=border_thin, top=border_thin, bottom=border_thin)
             data_font = Font(name="Calibri", size=10)
 
-            ws.merge_cells("A1:K1")
+            ws.merge_cells("A1:L1")
             title_cell = ws.cell(row=1, column=1, value="PARAMETERS OF ASSESSMENT – PART Y")
             title_cell.font = title_font
             title_cell.alignment = Alignment(horizontal="center", vertical="center")
@@ -1027,7 +1029,7 @@ class AdminExportDataView(APIView):
                 subtitle_parts.append(f"Slot: {filter_slot_param}")
             subtitle_text = " | ".join(subtitle_parts) if subtitle_parts else "Date: All Dates"
 
-            ws.merge_cells("A2:K2")
+            ws.merge_cells("A2:L2")
             sub_cell = ws.cell(row=2, column=1, value=subtitle_text)
             sub_cell.font = sub_font
             sub_cell.alignment = Alignment(horizontal="left", vertical="center")
@@ -1036,41 +1038,42 @@ class AdminExportDataView(APIView):
             headers_r3 = [
                 ("A", "Sr. No.", True),
                 ("B", "Admission Form No.", True),
-                ("C", "Slot No", True),
-                ("D", "Slot Time", True),
-                ("E", "M", True),
-                ("F", "MI", True),
-                ("G:H", "Cognitive Assessment", False),
-                ("I", "Affective Assessment", False),
-                ("J", "Psychomotor Assessment", False),
-                ("K", "Total", False),
+                ("C", "Application No.", True),
+                ("D", "Slot No", True),
+                ("E", "Slot Time", True),
+                ("F", "M", True),
+                ("G", "MI", True),
+                ("H:I", "Cognitive Assessment", False),
+                ("J", "Affective Assessment", False),
+                ("K", "Psychomotor Assessment", False),
+                ("L", "Total", False),
             ]
 
             for col_letter, text, is_vert_merged in headers_r3:
                 if is_vert_merged:
                     ws.merge_cells(f"{col_letter}3:{col_letter}4")
                     ws[f"{col_letter}3"] = text
-                elif col_letter == "G:H":
-                    ws.merge_cells("G3:H3")
-                    ws["G3"] = text
-                elif col_letter == "I":
-                    ws["I3"] = text
+                elif col_letter == "H:I":
+                    ws.merge_cells("H3:I3")
+                    ws["H3"] = text
                 elif col_letter == "J":
                     ws["J3"] = text
                 elif col_letter == "K":
                     ws["K3"] = text
+                elif col_letter == "L":
+                    ws["L3"] = text
 
-            ws["G4"] = 5
             ws["H4"] = 5
-            ws["I4"] = 10
+            ws["I4"] = 5
             ws["J4"] = 10
-            ws["K4"] = 30
+            ws["K4"] = 10
+            ws["L4"] = 30
 
             ws.row_dimensions[3].height = 24
             ws.row_dimensions[4].height = 20
 
             for r in [3, 4]:
-                for c in range(1, 12):
+                for c in range(1, 13):
                     cell = ws.cell(row=r, column=c)
                     cell.font = header_font
                     cell.fill = header_fill
@@ -1081,7 +1084,8 @@ class AdminExportDataView(APIView):
             for idx, app in enumerate(qs, start=1):
                 slot_no_val = app.interaction_slot_no if app.interaction_slot_no else "-"
                 slot_time_val = app.interaction_time or "-"
-                sub_id_val = str(app.submission.id) if app.submission else (str(app.submission_id) if app.submission_id else (app.application_number or "-"))
+                sub_id_val = str(app.submission.id) if app.submission else (str(app.submission_id) if app.submission_id else "-")
+                app_no_val = str(app.application_number or f"SF_{app.id}")
 
                 m_val = app.evaluator_m or ""
                 mi_val = app.evaluator_mi or ""
@@ -1094,6 +1098,7 @@ class AdminExportDataView(APIView):
                 row_values = [
                     idx,
                     sub_id_val,
+                    app_no_val,
                     slot_no_val,
                     slot_time_val,
                     m_val,
@@ -1107,7 +1112,7 @@ class AdminExportDataView(APIView):
 
                 ws.append(row_values)
                 ws.row_dimensions[current_row].height = 22
-                for col_idx in range(1, 12):
+                for col_idx in range(1, 13):
                     cell = ws.cell(row=current_row, column=col_idx)
                     cell.font = data_font
                     cell.border = cell_border
@@ -1117,7 +1122,7 @@ class AdminExportDataView(APIView):
 
             from openpyxl.utils import get_column_letter
 
-            for col_idx in range(1, 12):
+            for col_idx in range(1, 13):
                 col_letter = get_column_letter(col_idx)
                 max_len = 0
                 for r in range(5, current_row):
@@ -1127,8 +1132,9 @@ class AdminExportDataView(APIView):
 
             ws.column_dimensions["A"].width = 8
             ws.column_dimensions["B"].width = 20
-            ws.column_dimensions["C"].width = 10
-            ws.column_dimensions["D"].width = 24
+            ws.column_dimensions["C"].width = 18
+            ws.column_dimensions["D"].width = 10
+            ws.column_dimensions["E"].width = 24
 
             filename_parts = [filename_prefix]
             if filter_date_str:

@@ -477,6 +477,8 @@ def send_whatsapp_interaction_scheduled_message(
 
 def send_whatsapp_interaction_reminder_message(
     recipient_number: str,
+    submission_id: str,
+    application_number: str,
     date_str: str,
     slot_no: int,
     time_str: str,
@@ -485,10 +487,12 @@ def send_whatsapp_interaction_reminder_message(
     """
     Sends WhatsApp interaction reminder notification to parents at 8:00 AM IST
     on the day BEFORE their scheduled interaction date.
-    Meta Utility Template Parameters (3 Variables):
-    {{1}}: Date (e.g. 26/11/2026)
-    {{2}}: Slot Number (e.g. 1)
-    {{3}}: Slot Time (e.g. 9:00 AM TO 10:00 AM)
+    Meta Utility Template Parameters (5 Variables):
+    {{1}}: Submission ID (e.g. 145)
+    {{2}}: Application Number (e.g. SF2026-0001)
+    {{3}}: Date (e.g. 26/11/2026)
+    {{4}}: Slot Number (e.g. 1)
+    {{5}}: Slot Time (e.g. 9:00 AM TO 10:00 AM)
     """
     clean_phone = normalize_phone_number(recipient_number)
     phone_number_id = getattr(settings, 'WHATSAPP_PHONE_NUMBER_ID', '')
@@ -518,6 +522,8 @@ def send_whatsapp_interaction_reminder_message(
                 {
                     "type": "body",
                     "parameters": [
+                        {"type": "text", "text": str(submission_id)},
+                        {"type": "text", "text": str(application_number)},
                         {"type": "text", "text": str(date_str)},
                         {"type": "text", "text": str(slot_no)},
                         {"type": "text", "text": str(time_str)}
@@ -530,7 +536,7 @@ def send_whatsapp_interaction_reminder_message(
     try:
         logger.info(
             f"[INTERACTION REMINDER] Sending template '{template_name}' to {clean_phone} "
-            f"(Date: {date_str}, Slot: {slot_no}, Time: {time_str})..."
+            f"(SubID: {submission_id}, AppNo: {application_number}, Date: {date_str}, Slot: {slot_no}, Time: {time_str})..."
         )
         response = requests.post(url, json=payload, headers=headers, timeout=10)
         try:
@@ -558,9 +564,11 @@ def send_whatsapp_interaction_reminder_message(
                 phone=clean_phone,
                 template_name=template_name,
                 parameters={
-                    "1": str(date_str),
-                    "2": str(slot_no),
-                    "3": str(time_str)
+                    "1": str(submission_id),
+                    "2": str(application_number),
+                    "3": str(date_str),
+                    "4": str(slot_no),
+                    "5": str(time_str)
                 },
                 language="en",
                 message_id=msg_id

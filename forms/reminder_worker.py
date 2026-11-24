@@ -148,8 +148,13 @@ def send_due_interaction_reminders(target_date: date = None) -> dict:
             slot_no = app.interaction_slot_no or 1
             slot_time = app.interaction_time or "9:00 AM TO 10:00 AM"
 
+            sub_id_str = str(app.submission.id) if app.submission else (str(app.submission_id) if app.submission_id else "-")
+            app_no_str = str(app.application_number or f"SF_{app.id}")
+
             res = send_whatsapp_interaction_reminder_message(
                 recipient_number=recipient_phone,
+                submission_id=sub_id_str,
+                application_number=app_no_str,
                 date_str=date_formatted,
                 slot_no=slot_no,
                 time_str=slot_time,
