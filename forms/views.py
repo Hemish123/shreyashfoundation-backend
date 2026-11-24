@@ -648,12 +648,16 @@ class AdminInteractionCalendarView(APIView):
             }, status=status.HTTP_403_FORBIDDEN)
 
         filter_date_str = request.query_params.get("date")
+        filter_slot_param = request.query_params.get("slot") or request.query_params.get("slot_no")
         queryset = AdmissionApplication.objects.filter(
             interaction_date__isnull=False
         ).select_related('submission').order_by('interaction_date', 'interaction_slot_no', 'created_at')
 
         if filter_date_str:
             queryset = queryset.filter(interaction_date=filter_date_str)
+
+        if filter_slot_param and str(filter_slot_param).strip().isdigit():
+            queryset = queryset.filter(interaction_slot_no=int(filter_slot_param))
 
         # Group day-wise & slot-wise for the Calendar UI
         calendar_data = {}
@@ -697,8 +701,13 @@ class AdminInteractionCalendarView(APIView):
             from openpyxl import Workbook
             from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
-            filename_date = filter_date_str if filter_date_str else "All_Dates"
-            filename = f"Parameters_Of_Assessment_Part_Y_{filename_date}_{timezone.now().strftime('%Y%m%d_%H%M%S')}"
+            filename_parts = ["Parameters_Of_Assessment_Part_Y"]
+            if filter_date_str:
+                filename_parts.append(filter_date_str)
+            if filter_slot_param:
+                filename_parts.append(f"Slot_{filter_slot_param}")
+            filename_parts.append(timezone.now().strftime('%Y%m%d_%H%M%S'))
+            filename = "_".join(filename_parts)
 
             wb = Workbook()
             ws = wb.active
@@ -707,79 +716,80 @@ class AdminInteractionCalendarView(APIView):
 
             # Styling definitions
             title_font = Font(name="Calibri", size=14, bold=True, underline="single", color="000000")
-            sub_font = Font(name="Calibri", size=11, bold=True, color="000000")
             header_font = Font(name="Calibri", size=10, bold=True, color="000000")
             header_fill = PatternFill(start_color="F2F4F7", end_color="F2F4F7", fill_type="solid")
             border_thin = Side(style='thin', color='000000')
             cell_border = Border(left=border_thin, right=border_thin, top=border_thin, bottom=border_thin)
             data_font = Font(name="Calibri", size=10)
 
-            # Row 1: Title (Centered across columns A to L)
-            ws.merge_cells("A1:L1")
+            # Row 1: Title (Centered across columns A to K)
+            ws.merge_cells("A1:K1")
             title_cell = ws.cell(row=1, column=1, value="PARAMETERS OF ASSESSMENT – PART Y")
             title_cell.font = title_font
             title_cell.alignment = Alignment(horizontal="center", vertical="center")
             ws.row_dimensions[1].height = 28
 
-            # Row 2: Subtitle Metadata (Date & Slot Capacity)
-            date_display = filter_date_str if filter_date_str else "All Dates"
-            ws.merge_cells("A2:E2")
-            d_cell = ws.cell(row=2, column=1, value=f"Date: {date_display}")
-            d_cell.font = sub_font
-            d_cell.alignment = Alignment(horizontal="left", vertical="center")
+            # Row 2: Subtitle Metadata (Date, and Slot if slot-filtered)
+            sub_font = Font(name="Calibri", size=11, bold=True, color="000000")
+            subtitle_parts = []
+            if filter_date_str:
+                subtitle_parts.append(f"Date: {filter_date_str}")
+            if filter_slot_param:
+                subtitle_parts.append(f"Slot: {filter_slot_param}")
+            subtitle_text = " | ".join(subtitle_parts) if subtitle_parts else "Date: All Dates"
 
-            ws.merge_cells("F2:L2")
-            slot_meta_cell = ws.cell(row=2, column=6, value="Slot Numbers (Capacity-40 per day)")
-            slot_meta_cell.font = sub_font
-            slot_meta_cell.alignment = Alignment(horizontal="right", vertical="center")
+            ws.merge_cells("A2:K2")
+            sub_cell = ws.cell(row=2, column=1, value=subtitle_text)
+            sub_cell.font = sub_font
+            sub_cell.alignment = Alignment(horizontal="left", vertical="center")
             ws.row_dimensions[2].height = 22
 
-            # Two-tier Headers:
+            # Two-tier Headers at Row 3 & Row 4
+            # (Interaction Date column removed as requested, now 11 columns A to K)
             # Row 3: Main Headers
             # Row 4: Sub-headers / Individual Marks (Cognitive 5, 5; Affective 10; Psychomotor 10; Total 30)
             headers_r3 = [
                 ("A", "Sr. No.", True),
                 ("B", "Admission Form No.", True),
-                ("C", "Interaction Date", True),
-                ("D", "Slot No", True),
-                ("E", "Slot Time", True),
-                ("F", "M", True),
-                ("G", "MI", True),
-                ("H:I", "Cognitive Assessment", False),
-                ("J", "Affective Assessment", False),
-                ("K", "Psychomotor Assessment", False),
-                ("L", "Total", False),
+                ("C", "Slot No", True),
+                ("D", "Slot Time", True),
+                ("E", "M", True),
+                ("F", "MI", True),
+                ("G:H", "Cognitive Assessment", False),
+                ("I", "Affective Assessment", False),
+                ("J", "Psychomotor Assessment", False),
+                ("K", "Total", False),
             ]
 
-            # Merge vertical for columns A to G (Row 3 to 4)
+            # Merge vertical for columns A to F (Row 3 to 4)
             for col_letter, text, is_vert_merged in headers_r3:
                 if is_vert_merged:
                     ws.merge_cells(f"{col_letter}3:{col_letter}4")
                     cell = ws[f"{col_letter}3"]
                     cell.value = text
-                elif col_letter == "H:I":
-                    ws.merge_cells("H3:I3")
-                    ws["H3"] = text
+                elif col_letter == "G:H":
+                    ws.merge_cells("G3:H3")
+                    ws["G3"] = text
+                elif col_letter == "I":
+                    ws["I3"] = text
                 elif col_letter == "J":
                     ws["J3"] = text
                 elif col_letter == "K":
                     ws["K3"] = text
-                elif col_letter == "L":
-                    ws["L3"] = text
 
             # Row 4 marks values
+            ws["G4"] = 5
             ws["H4"] = 5
-            ws["I4"] = 5
+            ws["I4"] = 10
             ws["J4"] = 10
-            ws["K4"] = 10
-            ws["L4"] = 30
+            ws["K4"] = 30
 
             ws.row_dimensions[3].height = 24
             ws.row_dimensions[4].height = 20
 
             # Apply borders and styling to Header Rows (3 and 4)
             for r in [3, 4]:
-                for c in range(1, 13):
+                for c in range(1, 12):
                     cell = ws.cell(row=r, column=c)
                     cell.font = header_font
                     cell.fill = header_fill
@@ -787,21 +797,12 @@ class AdminInteractionCalendarView(APIView):
                     cell.border = cell_border
 
             # Data Rows (Starting at Row 5)
-            # As per requirement:
-            # - Sr. No.: 1, 2, 3...
-            # - Admission Form No.: Submission ID (e.g. #145 or 145)
-            # - Interaction Date: Scheduled Date
-            # - Slot No: 1, 2, 3, 4
-            # - Slot Time: Time string
-            # - M, MI, Cognitive, Affective, Psychomotor, Total: ONLY HEADER (empty for examiner or existing evaluation)
             current_row = 5
             for idx, app in enumerate(queryset, start=1):
-                date_val = app.interaction_date.strftime("%d-%m-%Y") if app.interaction_date else "-"
                 slot_no_val = app.interaction_slot_no if app.interaction_slot_no else "-"
                 slot_time_val = app.interaction_time or "-"
                 sub_id_val = str(app.submission.id) if app.submission else (str(app.submission_id) if app.submission_id else (app.application_number or "-"))
 
-                # M, MI and assessment marks (only header blank row for examiner to fill, or filled if already evaluated)
                 m_val = app.evaluator_m or ""
                 mi_val = app.evaluator_mi or ""
                 cog1_val = app.cognitive_assessment_1 if app.cognitive_assessment_1 > 0 else ""
@@ -813,7 +814,6 @@ class AdminInteractionCalendarView(APIView):
                 row_values = [
                     idx,
                     sub_id_val,
-                    date_val,
                     slot_no_val,
                     slot_time_val,
                     m_val,
@@ -827,7 +827,7 @@ class AdminInteractionCalendarView(APIView):
 
                 ws.append(row_values)
                 ws.row_dimensions[current_row].height = 22
-                for col_idx in range(1, 13):
+                for col_idx in range(1, 12):
                     cell = ws.cell(row=current_row, column=col_idx)
                     cell.font = data_font
                     cell.border = cell_border
@@ -838,7 +838,7 @@ class AdminInteractionCalendarView(APIView):
             # Column width settings (Safe with merged cells in openpyxl)
             from openpyxl.utils import get_column_letter
 
-            for col_idx in range(1, 13):
+            for col_idx in range(1, 12):
                 col_letter = get_column_letter(col_idx)
                 max_len = 0
                 for r in range(5, current_row):
@@ -848,9 +848,8 @@ class AdminInteractionCalendarView(APIView):
 
             ws.column_dimensions["A"].width = 8   # Sr. No.
             ws.column_dimensions["B"].width = 20  # Admission Form No.
-            ws.column_dimensions["C"].width = 16  # Interaction Date
-            ws.column_dimensions["D"].width = 10  # Slot No
-            ws.column_dimensions["E"].width = 24  # Slot Time
+            ws.column_dimensions["C"].width = 10  # Slot No
+            ws.column_dimensions["D"].width = 24  # Slot Time
 
             response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
             response['Content-Disposition'] = f'attachment; filename="{filename}.xlsx"'
@@ -987,6 +986,7 @@ class AdminExportDataView(APIView):
         if export_type in ["calendar", "interaction", "interaction_calendar", "interactions"]:
             filename_prefix = "Parameters_Of_Assessment_Part_Y"
             filter_date_str = request.query_params.get("date") or request.GET.get("date")
+            filter_slot_param = request.query_params.get("slot") or request.query_params.get("slot_no") or request.GET.get("slot") or request.GET.get("slot_no")
             qs = AdmissionApplication.objects.filter(
                 interaction_date__isnull=False
             ).select_related('submission').order_by('interaction_date', 'interaction_slot_no', 'created_at')
@@ -996,6 +996,9 @@ class AdminExportDataView(APIView):
             elif start_date:
                 qs = qs.filter(interaction_date__gte=start_date.date())
 
+            if filter_slot_param and str(filter_slot_param).strip().isdigit():
+                qs = qs.filter(interaction_slot_no=int(filter_slot_param))
+
             # Return specialized Part Y template format for Excel
             wb = Workbook()
             ws = wb.active
@@ -1003,70 +1006,71 @@ class AdminExportDataView(APIView):
             ws.views.sheetView[0].showGridLines = True
 
             title_font = Font(name="Calibri", size=14, bold=True, underline="single", color="000000")
-            sub_font = Font(name="Calibri", size=11, bold=True, color="000000")
             header_font = Font(name="Calibri", size=10, bold=True, color="000000")
             header_fill = PatternFill(start_color="F2F4F7", end_color="F2F4F7", fill_type="solid")
             border_thin = Side(style='thin', color='000000')
             cell_border = Border(left=border_thin, right=border_thin, top=border_thin, bottom=border_thin)
             data_font = Font(name="Calibri", size=10)
 
-            ws.merge_cells("A1:L1")
+            ws.merge_cells("A1:K1")
             title_cell = ws.cell(row=1, column=1, value="PARAMETERS OF ASSESSMENT – PART Y")
             title_cell.font = title_font
             title_cell.alignment = Alignment(horizontal="center", vertical="center")
             ws.row_dimensions[1].height = 28
 
-            date_display = filter_date_str if filter_date_str else "All Dates"
-            ws.merge_cells("A2:E2")
-            d_cell = ws.cell(row=2, column=1, value=f"Date: {date_display}")
-            d_cell.font = sub_font
-            d_cell.alignment = Alignment(horizontal="left", vertical="center")
+            # Row 2: Subtitle Metadata (Date, and Slot if slot-filtered)
+            sub_font = Font(name="Calibri", size=11, bold=True, color="000000")
+            subtitle_parts = []
+            if filter_date_str:
+                subtitle_parts.append(f"Date: {filter_date_str}")
+            if filter_slot_param:
+                subtitle_parts.append(f"Slot: {filter_slot_param}")
+            subtitle_text = " | ".join(subtitle_parts) if subtitle_parts else "Date: All Dates"
 
-            ws.merge_cells("F2:L2")
-            slot_meta_cell = ws.cell(row=2, column=6, value="Slot Numbers (Capacity-40 per day)")
-            slot_meta_cell.font = sub_font
-            slot_meta_cell.alignment = Alignment(horizontal="right", vertical="center")
+            ws.merge_cells("A2:K2")
+            sub_cell = ws.cell(row=2, column=1, value=subtitle_text)
+            sub_cell.font = sub_font
+            sub_cell.alignment = Alignment(horizontal="left", vertical="center")
             ws.row_dimensions[2].height = 22
 
             headers_r3 = [
                 ("A", "Sr. No.", True),
                 ("B", "Admission Form No.", True),
-                ("C", "Interaction Date", True),
-                ("D", "Slot No", True),
-                ("E", "Slot Time", True),
-                ("F", "M", True),
-                ("G", "MI", True),
-                ("H:I", "Cognitive Assessment", False),
-                ("J", "Affective Assessment", False),
-                ("K", "Psychomotor Assessment", False),
-                ("L", "Total", False),
+                ("C", "Slot No", True),
+                ("D", "Slot Time", True),
+                ("E", "M", True),
+                ("F", "MI", True),
+                ("G:H", "Cognitive Assessment", False),
+                ("I", "Affective Assessment", False),
+                ("J", "Psychomotor Assessment", False),
+                ("K", "Total", False),
             ]
 
             for col_letter, text, is_vert_merged in headers_r3:
                 if is_vert_merged:
                     ws.merge_cells(f"{col_letter}3:{col_letter}4")
                     ws[f"{col_letter}3"] = text
-                elif col_letter == "H:I":
-                    ws.merge_cells("H3:I3")
-                    ws["H3"] = text
+                elif col_letter == "G:H":
+                    ws.merge_cells("G3:H3")
+                    ws["G3"] = text
+                elif col_letter == "I":
+                    ws["I3"] = text
                 elif col_letter == "J":
                     ws["J3"] = text
                 elif col_letter == "K":
                     ws["K3"] = text
-                elif col_letter == "L":
-                    ws["L3"] = text
 
+            ws["G4"] = 5
             ws["H4"] = 5
-            ws["I4"] = 5
+            ws["I4"] = 10
             ws["J4"] = 10
-            ws["K4"] = 10
-            ws["L4"] = 30
+            ws["K4"] = 30
 
             ws.row_dimensions[3].height = 24
             ws.row_dimensions[4].height = 20
 
             for r in [3, 4]:
-                for c in range(1, 13):
+                for c in range(1, 12):
                     cell = ws.cell(row=r, column=c)
                     cell.font = header_font
                     cell.fill = header_fill
@@ -1075,7 +1079,6 @@ class AdminExportDataView(APIView):
 
             current_row = 5
             for idx, app in enumerate(qs, start=1):
-                date_val = app.interaction_date.strftime("%d-%m-%Y") if app.interaction_date else "-"
                 slot_no_val = app.interaction_slot_no if app.interaction_slot_no else "-"
                 slot_time_val = app.interaction_time or "-"
                 sub_id_val = str(app.submission.id) if app.submission else (str(app.submission_id) if app.submission_id else (app.application_number or "-"))
@@ -1091,7 +1094,6 @@ class AdminExportDataView(APIView):
                 row_values = [
                     idx,
                     sub_id_val,
-                    date_val,
                     slot_no_val,
                     slot_time_val,
                     m_val,
@@ -1105,7 +1107,7 @@ class AdminExportDataView(APIView):
 
                 ws.append(row_values)
                 ws.row_dimensions[current_row].height = 22
-                for col_idx in range(1, 13):
+                for col_idx in range(1, 12):
                     cell = ws.cell(row=current_row, column=col_idx)
                     cell.font = data_font
                     cell.border = cell_border
@@ -1113,10 +1115,9 @@ class AdminExportDataView(APIView):
 
                 current_row += 1
 
-            # Column width settings (Safe with merged cells in openpyxl)
             from openpyxl.utils import get_column_letter
 
-            for col_idx in range(1, 13):
+            for col_idx in range(1, 12):
                 col_letter = get_column_letter(col_idx)
                 max_len = 0
                 for r in range(5, current_row):
@@ -1126,11 +1127,17 @@ class AdminExportDataView(APIView):
 
             ws.column_dimensions["A"].width = 8
             ws.column_dimensions["B"].width = 20
-            ws.column_dimensions["C"].width = 16
-            ws.column_dimensions["D"].width = 10
-            ws.column_dimensions["E"].width = 24
+            ws.column_dimensions["C"].width = 10
+            ws.column_dimensions["D"].width = 24
 
-            filename = f"{filename_prefix}_{filter_date_str if filter_date_str else 'All_Dates'}_{timezone.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+            filename_parts = [filename_prefix]
+            if filter_date_str:
+                filename_parts.append(filter_date_str)
+            if filter_slot_param:
+                filename_parts.append(f"Slot_{filter_slot_param}")
+            filename_parts.append(timezone.now().strftime('%Y%m%d_%H%M%S'))
+            filename = f"{'_'.join(filename_parts)}.xlsx"
+
             response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
             response['Content-Disposition'] = f'attachment; filename="{filename}"'
             wb.save(response)
