@@ -40,6 +40,7 @@ urlpatterns = [
     path('admin/interaction-reminders/trigger/', AdminTriggerInteractionReminderView.as_view(), name='admin-trigger-interaction-reminder'),
 
     # Step 2 & 3: Digital Assessment Form for Academicians & Educators
+    path('admin/evaluation/', AdminEvaluationAssessmentView.as_view(), name='admin-evaluation-list'),
     path('admin/evaluation/<int:application_id>/', AdminEvaluationAssessmentView.as_view(), name='admin-evaluation-assessment'),
 
     # Step 5 & 6: Merit Board, Rating & Cutoff (First 80 selected, waitlist rollover on cancellation)

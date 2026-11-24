@@ -2978,16 +2978,127 @@ class AdmissionApplicationView(APIView):
 class AdminEvaluationAssessmentView(APIView):
     """
     Step 2 & 3: Digital Assessment Form for Academicians & Educators
-    GET: Retrieve applicant metadata, Part X calculation breakdown, and existing Part Y scores.
-    POST: Save Part Y evaluation (Cognitive 5+5, Affective 10, Psychomotor 10), aggregate total 50 marks.
-    Endpoint: /api/admin/evaluation/<application_id>/
+    GET /api/admin/evaluation/<application_id>/: Retrieve single applicant breakdown & marks.
+    GET /api/admin/evaluation/: Retrieve all applicants evaluation breakdown (with search, status & pagination).
+    POST /api/admin/evaluation/<application_id>/: Save Part Y evaluation (Cognitive 5+5, Affective 10, Psychomotor 10).
     Header: Authorization: Bearer <ADMIN_PERMANENT_TOKEN>
     """
-    def get(self, request, application_id):
+    def get(self, request, application_id=None):
         denied = enforce_admin_token(request)
         if denied:
             return denied
 
+        from .evaluation_service import calculate_part_x_score
+
+        # Case 1: All evaluations listing when application_id is omitted
+        if not application_id:
+            search_query = (request.query_params.get("search") or request.query_params.get("q") or "").strip()
+            standard_filter = (request.query_params.get("standard") or "").strip()
+            medium_filter = (request.query_params.get("medium") or "").strip()
+            status_filter = (request.query_params.get("status") or "").strip().upper()
+
+            queryset = AdmissionApplication.objects.select_related('submission', 'evaluator').exclude(
+                admission_status__in=['CANCELLED', 'REJECTED']
+            ).order_by('-final_aggregate_score', 'merit_rank', 'id')
+
+            if standard_filter and not standard_filter.lower().startswith("all"):
+                queryset = queryset.filter(standard__iexact=standard_filter)
+
+            if medium_filter and not medium_filter.lower().startswith("all"):
+                queryset = queryset.filter(medium__iexact=medium_filter)
+
+            if status_filter and status_filter != "ALL":
+                queryset = queryset.filter(admission_status__iexact=status_filter)
+
+            if search_query:
+                clean_digits = re.sub(r"\D", "", search_query)
+                search_cond = (
+                    Q(child_first_name__icontains=search_query) |
+                    Q(child_surname__icontains=search_query) |
+                    Q(father_name__icontains=search_query) |
+                    Q(mother_name__icontains=search_query) |
+                    Q(application_number__icontains=search_query) |
+                    Q(father_whatsapp__icontains=search_query) |
+                    Q(mother_whatsapp__icontains=search_query)
+                )
+                if clean_digits:
+                    search_cond |= Q(father_whatsapp__icontains=clean_digits) | Q(submission__whatsapp_number__icontains=clean_digits)
+                if search_query.isdigit():
+                    search_cond |= Q(submission_id=int(search_query)) | Q(id=int(search_query))
+                queryset = queryset.filter(search_cond)
+
+            total_records = queryset.count()
+            page = int(request.query_params.get("page", 1))
+            page_size = int(request.query_params.get("page_size", request.query_params.get("limit", 50)))
+            if page < 1:
+                page = 1
+            if page_size < 1:
+                page_size = 50
+
+            total_pages = (total_records + page_size - 1) // page_size if total_records > 0 else 1
+            offset = (page - 1) * page_size
+            page_items = list(queryset[offset:offset + page_size])
+
+            evaluations_list = []
+            for app in page_items:
+                reward_m = round((app.alak_malak_score or 0.0) + (app.sibling_score or 0.0), 2)
+                sub_id_val = app.submission.id if app.submission else app.submission_id
+                evaluations_list.append({
+                    "application_id": app.id,
+                    "submission_id": sub_id_val,
+                    "application_number": app.application_number,
+                    "student_name": f"{app.child_first_name or ''} {app.child_surname or ''}".strip(),
+                    "parent_name": app.father_name or app.mother_name or "",
+                    "contact_number": app.father_whatsapp or (app.submission.whatsapp_number if app.submission else "") or app.mother_whatsapp or "",
+                    "standard": app.standard,
+                    "medium": app.medium,
+                    "vibhag": app.vibhag,
+                    "interaction_date": str(app.interaction_date) if app.interaction_date else None,
+                    "interaction_slot_no": app.interaction_slot_no,
+                    "interaction_time": app.interaction_time,
+                    "evaluator": app.evaluator.full_name or app.evaluator.username if app.evaluator else None,
+                    "evaluator_m": app.evaluator_m or "",
+                    "evaluator_mi": app.evaluator_mi or "",
+                    "part_x": {
+                        "max_marks": 50,
+                        "quiz_score": app.total_part_x_score or 0.0
+                    },
+                    "part_y": {
+                        "max_marks": 30,
+                        "cognitive_assessment_1": app.cognitive_assessment_1 or 0.0,
+                        "cognitive_assessment_2": app.cognitive_assessment_2 or 0.0,
+                        "affective_assessment": app.affective_assessment or 0.0,
+                        "psychomotor_assessment": app.psychomotor_assessment or 0.0,
+                        "total_part_y_score": app.total_part_y_score or 0.0
+                    },
+                    "reward_marks": {
+                        "max_marks": 13,
+                        "alak_malak_score": app.alak_malak_score or 0.0,
+                        "sibling_score": app.sibling_score or 0.0,
+                        "total_reward_marks": reward_m
+                    },
+                    "final_aggregate_score": app.final_aggregate_score or 0.0,
+                    "max_total_score": 93,
+                    "merit_rank": app.merit_rank,
+                    "admission_status": app.admission_status,
+                    "is_part_y_completed": bool(app.total_part_y_score and app.total_part_y_score > 0)
+                })
+
+            return Response({
+                "status": "success",
+                "pagination": {
+                    "page": page,
+                    "page_size": page_size,
+                    "total_records": total_records,
+                    "total_pages": total_pages,
+                    "has_next": page < total_pages,
+                    "has_previous": page > 1
+                },
+                "total_records": total_records,
+                "evaluations": evaluations_list
+            }, status=status.HTTP_200_OK)
+
+        # Case 2: Single application details by ID
         application = AdmissionApplication.objects.select_related('submission', 'evaluator').filter(id=application_id).first()
         if not application:
             return Response({
@@ -2996,7 +3107,6 @@ class AdminEvaluationAssessmentView(APIView):
             }, status=status.HTTP_404_NOT_FOUND)
 
         # Pre-calculate or ensure Part X score is up to date
-        from .evaluation_service import calculate_part_x_score
         calculate_part_x_score(application, save=True)
 
         # Extract written responses and any AI evaluations from submission
@@ -3015,6 +3125,7 @@ class AdminEvaluationAssessmentView(APIView):
         return Response({
             "status": "success",
             "application_id": application.id,
+            "submission_id": application.submission.id if application.submission else application.submission_id,
             "application_number": application.application_number,
             "student_info": {
                 "name": f"{application.child_first_name} {application.child_surname}".strip(),
