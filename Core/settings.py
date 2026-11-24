@@ -170,10 +170,10 @@ USE_TZ = True
 
 
 # Static files (CSS, JavaScript, Images)
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 
-# WhiteNoise storage configuration for compressed static files (CompressedStaticFilesStorage avoids strict missing manifest 500 errors)
+# WhiteNoise storage configuration for compressed static files
 STORAGES = {
     "default": {
         "BACKEND": "storages.backends.azure_storage.AzureStorage" if (os.getenv('AZURE_ACCOUNT_NAME') and os.getenv('AZURE_ACCOUNT_KEY')) else "django.core.files.storage.FileSystemStorage",
