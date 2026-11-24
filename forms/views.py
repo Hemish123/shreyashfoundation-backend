@@ -835,15 +835,16 @@ class AdminInteractionCalendarView(APIView):
 
                 current_row += 1
 
-            # Auto fit column widths
-            for col in ws.columns:
+            # Column width settings (Safe with merged cells in openpyxl)
+            from openpyxl.utils import get_column_letter
+
+            for col_idx in range(1, 13):
+                col_letter = get_column_letter(col_idx)
                 max_len = 0
-                for cell in col:
-                    if cell.row > 2:  # skip merged titles
-                        val_str = str(cell.value or '')
-                        max_len = max(max_len, len(val_str))
-                col_letter = col[0].column_letter
-                ws.column_dimensions[col_letter].width = max(max_len + 5, 12)
+                for r in range(5, current_row):
+                    cell_val = str(ws.cell(row=r, column=col_idx).value or '')
+                    max_len = max(max_len, len(cell_val))
+                ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
 
             ws.column_dimensions["A"].width = 8   # Sr. No.
             ws.column_dimensions["B"].width = 20  # Admission Form No.
@@ -1112,14 +1113,16 @@ class AdminExportDataView(APIView):
 
                 current_row += 1
 
-            for col in ws.columns:
+            # Column width settings (Safe with merged cells in openpyxl)
+            from openpyxl.utils import get_column_letter
+
+            for col_idx in range(1, 13):
+                col_letter = get_column_letter(col_idx)
                 max_len = 0
-                for cell in col:
-                    if cell.row > 2:
-                        val_str = str(cell.value or '')
-                        max_len = max(max_len, len(val_str))
-                col_letter = col[0].column_letter
-                ws.column_dimensions[col_letter].width = max(max_len + 5, 12)
+                for r in range(5, current_row):
+                    cell_val = str(ws.cell(row=r, column=col_idx).value or '')
+                    max_len = max(max_len, len(cell_val))
+                ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
 
             ws.column_dimensions["A"].width = 8
             ws.column_dimensions["B"].width = 20
