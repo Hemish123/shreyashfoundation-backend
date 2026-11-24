@@ -268,6 +268,8 @@ class AdmissionApplication(models.Model):
     interaction_time = models.CharField(max_length=50, blank=True, help_text="e.g. 9:00 AM TO 10:00 AM")
     interaction_venue = models.CharField(max_length=150, default="Shreyas Foundation – Main Office", blank=True)
     interaction_whatsapp_sent = models.BooleanField(default=False)
+    interaction_reminder_sent = models.BooleanField(default=False, help_text="Whether previous-day 8:00 AM reminder was sent")
+    interaction_reminder_sent_at = models.DateTimeField(null=True, blank=True, help_text="Timestamp when previous-day reminder was sent")
     parent_confirmed_slot = models.BooleanField(default=False, help_text="Parent confirmed slot via WhatsApp/Portal")
 
     # Assessment & Scores (PART X + PART Y)

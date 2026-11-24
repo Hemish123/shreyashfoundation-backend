@@ -5,7 +5,7 @@ import re
 import os
 import requests
 import threading
-from datetime import timedelta
+from datetime import datetime, date, timedelta
 
 from django.shortcuts import get_object_or_404
 from django.conf import settings
@@ -677,6 +677,7 @@ class AdminInteractionCalendarView(APIView):
                 calendar_data[date_key]["slots"][slot_no]["count"] += 1
                 calendar_data[date_key]["slots"][slot_no]["children"].append({
                     "application_id": app.id,
+                    "submission_id": app.submission_id or (app.submission.id if app.submission else None),
                     "application_number": app.application_number,
                     "child_name": f"{app.child_first_name} {app.child_surname}".strip(),
                     "standard": app.standard,
@@ -684,8 +685,176 @@ class AdminInteractionCalendarView(APIView):
                     "vibhag": app.vibhag,
                     "father_name": app.father_name,
                     "father_whatsapp": app.father_whatsapp or (app.submission.whatsapp_number if app.submission else ""),
-                    "whatsapp_sent": app.interaction_whatsapp_sent
+                    "whatsapp_sent": app.interaction_whatsapp_sent,
+                    "reminder_sent": app.interaction_reminder_sent,
+                    "reminder_sent_at": app.interaction_reminder_sent_at.strftime("%Y-%m-%d %H:%M:%S") if app.interaction_reminder_sent_at else None
                 })
+
+        # Check if caller wants direct export (Excel Only: Assessment Part Y format)
+        export_param = request.query_params.get("export") or request.query_params.get("format") or request.query_params.get("export_format")
+        if export_param and str(export_param).lower() in ["excel", "xlsx", "true", "1"]:
+            from django.http import HttpResponse
+            from openpyxl import Workbook
+            from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+
+            filename_date = filter_date_str if filter_date_str else "All_Dates"
+            filename = f"Parameters_Of_Assessment_Part_Y_{filename_date}_{timezone.now().strftime('%Y%m%d_%H%M%S')}"
+
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "Assessment - Part Y"
+            ws.views.sheetView[0].showGridLines = True
+
+            # Styling definitions
+            title_font = Font(name="Calibri", size=14, bold=True, underline="single", color="000000")
+            sub_font = Font(name="Calibri", size=11, bold=True, color="000000")
+            header_font = Font(name="Calibri", size=10, bold=True, color="000000")
+            header_fill = PatternFill(start_color="F2F4F7", end_color="F2F4F7", fill_type="solid")
+            border_thin = Side(style='thin', color='000000')
+            cell_border = Border(left=border_thin, right=border_thin, top=border_thin, bottom=border_thin)
+            data_font = Font(name="Calibri", size=10)
+
+            # Row 1: Title (Centered across columns A to L)
+            ws.merge_cells("A1:L1")
+            title_cell = ws.cell(row=1, column=1, value="PARAMETERS OF ASSESSMENT – PART Y")
+            title_cell.font = title_font
+            title_cell.alignment = Alignment(horizontal="center", vertical="center")
+            ws.row_dimensions[1].height = 28
+
+            # Row 2: Subtitle Metadata (Date & Slot Capacity)
+            date_display = filter_date_str if filter_date_str else "All Dates"
+            ws.merge_cells("A2:E2")
+            d_cell = ws.cell(row=2, column=1, value=f"Date: {date_display}")
+            d_cell.font = sub_font
+            d_cell.alignment = Alignment(horizontal="left", vertical="center")
+
+            ws.merge_cells("F2:L2")
+            slot_meta_cell = ws.cell(row=2, column=6, value="Slot Numbers (Capacity-40 per day)")
+            slot_meta_cell.font = sub_font
+            slot_meta_cell.alignment = Alignment(horizontal="right", vertical="center")
+            ws.row_dimensions[2].height = 22
+
+            # Two-tier Headers:
+            # Row 3: Main Headers
+            # Row 4: Sub-headers / Individual Marks (Cognitive 5, 5; Affective 10; Psychomotor 10; Total 30)
+            headers_r3 = [
+                ("A", "Sr. No.", True),
+                ("B", "Admission Form No.", True),
+                ("C", "Interaction Date", True),
+                ("D", "Slot No", True),
+                ("E", "Slot Time", True),
+                ("F", "M", True),
+                ("G", "MI", True),
+                ("H:I", "Cognitive Assessment", False),
+                ("J", "Affective Assessment", False),
+                ("K", "Psychomotor Assessment", False),
+                ("L", "Total", False),
+            ]
+
+            # Merge vertical for columns A to G (Row 3 to 4)
+            for col_letter, text, is_vert_merged in headers_r3:
+                if is_vert_merged:
+                    ws.merge_cells(f"{col_letter}3:{col_letter}4")
+                    cell = ws[f"{col_letter}3"]
+                    cell.value = text
+                elif col_letter == "H:I":
+                    ws.merge_cells("H3:I3")
+                    ws["H3"] = text
+                elif col_letter == "J":
+                    ws["J3"] = text
+                elif col_letter == "K":
+                    ws["K3"] = text
+                elif col_letter == "L":
+                    ws["L3"] = text
+
+            # Row 4 marks values
+            ws["H4"] = 5
+            ws["I4"] = 5
+            ws["J4"] = 10
+            ws["K4"] = 10
+            ws["L4"] = 30
+
+            ws.row_dimensions[3].height = 24
+            ws.row_dimensions[4].height = 20
+
+            # Apply borders and styling to Header Rows (3 and 4)
+            for r in [3, 4]:
+                for c in range(1, 13):
+                    cell = ws.cell(row=r, column=c)
+                    cell.font = header_font
+                    cell.fill = header_fill
+                    cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+                    cell.border = cell_border
+
+            # Data Rows (Starting at Row 5)
+            # As per requirement:
+            # - Sr. No.: 1, 2, 3...
+            # - Admission Form No.: Submission ID (e.g. #145 or 145)
+            # - Interaction Date: Scheduled Date
+            # - Slot No: 1, 2, 3, 4
+            # - Slot Time: Time string
+            # - M, MI, Cognitive, Affective, Psychomotor, Total: ONLY HEADER (empty for examiner or existing evaluation)
+            current_row = 5
+            for idx, app in enumerate(queryset, start=1):
+                date_val = app.interaction_date.strftime("%d-%m-%Y") if app.interaction_date else "-"
+                slot_no_val = app.interaction_slot_no if app.interaction_slot_no else "-"
+                slot_time_val = app.interaction_time or "-"
+                sub_id_val = str(app.submission.id) if app.submission else (str(app.submission_id) if app.submission_id else (app.application_number or "-"))
+
+                # M, MI and assessment marks (only header blank row for examiner to fill, or filled if already evaluated)
+                m_val = app.evaluator_m or ""
+                mi_val = app.evaluator_mi or ""
+                cog1_val = app.cognitive_assessment_1 if app.cognitive_assessment_1 > 0 else ""
+                cog2_val = app.cognitive_assessment_2 if app.cognitive_assessment_2 > 0 else ""
+                aff_val = app.affective_assessment if app.affective_assessment > 0 else ""
+                psy_val = app.psychomotor_assessment if app.psychomotor_assessment > 0 else ""
+                total_y_val = app.total_part_y_score if app.total_part_y_score > 0 else ""
+
+                row_values = [
+                    idx,
+                    sub_id_val,
+                    date_val,
+                    slot_no_val,
+                    slot_time_val,
+                    m_val,
+                    mi_val,
+                    cog1_val,
+                    cog2_val,
+                    aff_val,
+                    psy_val,
+                    total_y_val
+                ]
+
+                ws.append(row_values)
+                ws.row_dimensions[current_row].height = 22
+                for col_idx in range(1, 13):
+                    cell = ws.cell(row=current_row, column=col_idx)
+                    cell.font = data_font
+                    cell.border = cell_border
+                    cell.alignment = Alignment(horizontal="center", vertical="center")
+
+                current_row += 1
+
+            # Auto fit column widths
+            for col in ws.columns:
+                max_len = 0
+                for cell in col:
+                    if cell.row > 2:  # skip merged titles
+                        val_str = str(cell.value or '')
+                        max_len = max(max_len, len(val_str))
+                col_letter = col[0].column_letter
+                ws.column_dimensions[col_letter].width = max(max_len + 5, 12)
+
+            ws.column_dimensions["A"].width = 8   # Sr. No.
+            ws.column_dimensions["B"].width = 20  # Admission Form No.
+            ws.column_dimensions["C"].width = 16  # Interaction Date
+            ws.column_dimensions["D"].width = 10  # Slot No
+            ws.column_dimensions["E"].width = 24  # Slot Time
+
+            response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+            response['Content-Disposition'] = f'attachment; filename="{filename}.xlsx"'
+            wb.save(response)
+            return response
 
         # Format output list
         days_list = []
@@ -724,6 +893,45 @@ class AdminInteractionCalendarView(APIView):
             },
             "calendar": days_list
         }, status=status.HTTP_200_OK)
+
+
+class AdminTriggerInteractionReminderView(APIView):
+    """
+    Admin endpoint to trigger or test the 8:00 AM IST interaction reminders.
+    POST /api/admin/interaction-reminders/trigger/
+    Query/Body params:
+      - date: YYYY-MM-DD (optional, defaults to tomorrow)
+    """
+    def post(self, request):
+        denied = enforce_admin_token(request)
+        if denied:
+            return denied
+
+        _, logged_in_admin, role = get_authenticated_admin_user(request)
+        if role != 'ADMIN':
+            return Response({
+                "status": "error",
+                "message": "Only Admins can trigger interaction reminders."
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        target_date_str = request.data.get('date') or request.query_params.get('date')
+        target_date = None
+        if target_date_str:
+            try:
+                target_date = datetime.strptime(str(target_date_str).strip(), "%Y-%m-%d").date()
+            except ValueError:
+                return Response({
+                    "status": "error",
+                    "message": "Invalid date format. Expected YYYY-MM-DD."
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        from .reminder_worker import send_due_interaction_reminders
+        result = send_due_interaction_reminders(target_date=target_date)
+
+        return Response({
+            "status": "success" if result.get("success") else "error",
+            "result": result
+        }, status=status.HTTP_200_OK if result.get("success") else status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class AdminExportDataView(APIView):
@@ -775,7 +983,157 @@ class AdminExportDataView(APIView):
             start_date = now - timedelta(days=30)
 
         # 1. Base Queryset Filtering
-        if export_type in ["submitted", "submissions", "submitted_applications"]:
+        if export_type in ["calendar", "interaction", "interaction_calendar", "interactions"]:
+            filename_prefix = "Parameters_Of_Assessment_Part_Y"
+            filter_date_str = request.query_params.get("date") or request.GET.get("date")
+            qs = AdmissionApplication.objects.filter(
+                interaction_date__isnull=False
+            ).select_related('submission').order_by('interaction_date', 'interaction_slot_no', 'created_at')
+
+            if filter_date_str:
+                qs = qs.filter(interaction_date=filter_date_str)
+            elif start_date:
+                qs = qs.filter(interaction_date__gte=start_date.date())
+
+            # Return specialized Part Y template format for Excel
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "Assessment - Part Y"
+            ws.views.sheetView[0].showGridLines = True
+
+            title_font = Font(name="Calibri", size=14, bold=True, underline="single", color="000000")
+            sub_font = Font(name="Calibri", size=11, bold=True, color="000000")
+            header_font = Font(name="Calibri", size=10, bold=True, color="000000")
+            header_fill = PatternFill(start_color="F2F4F7", end_color="F2F4F7", fill_type="solid")
+            border_thin = Side(style='thin', color='000000')
+            cell_border = Border(left=border_thin, right=border_thin, top=border_thin, bottom=border_thin)
+            data_font = Font(name="Calibri", size=10)
+
+            ws.merge_cells("A1:L1")
+            title_cell = ws.cell(row=1, column=1, value="PARAMETERS OF ASSESSMENT – PART Y")
+            title_cell.font = title_font
+            title_cell.alignment = Alignment(horizontal="center", vertical="center")
+            ws.row_dimensions[1].height = 28
+
+            date_display = filter_date_str if filter_date_str else "All Dates"
+            ws.merge_cells("A2:E2")
+            d_cell = ws.cell(row=2, column=1, value=f"Date: {date_display}")
+            d_cell.font = sub_font
+            d_cell.alignment = Alignment(horizontal="left", vertical="center")
+
+            ws.merge_cells("F2:L2")
+            slot_meta_cell = ws.cell(row=2, column=6, value="Slot Numbers (Capacity-40 per day)")
+            slot_meta_cell.font = sub_font
+            slot_meta_cell.alignment = Alignment(horizontal="right", vertical="center")
+            ws.row_dimensions[2].height = 22
+
+            headers_r3 = [
+                ("A", "Sr. No.", True),
+                ("B", "Admission Form No.", True),
+                ("C", "Interaction Date", True),
+                ("D", "Slot No", True),
+                ("E", "Slot Time", True),
+                ("F", "M", True),
+                ("G", "MI", True),
+                ("H:I", "Cognitive Assessment", False),
+                ("J", "Affective Assessment", False),
+                ("K", "Psychomotor Assessment", False),
+                ("L", "Total", False),
+            ]
+
+            for col_letter, text, is_vert_merged in headers_r3:
+                if is_vert_merged:
+                    ws.merge_cells(f"{col_letter}3:{col_letter}4")
+                    ws[f"{col_letter}3"] = text
+                elif col_letter == "H:I":
+                    ws.merge_cells("H3:I3")
+                    ws["H3"] = text
+                elif col_letter == "J":
+                    ws["J3"] = text
+                elif col_letter == "K":
+                    ws["K3"] = text
+                elif col_letter == "L":
+                    ws["L3"] = text
+
+            ws["H4"] = 5
+            ws["I4"] = 5
+            ws["J4"] = 10
+            ws["K4"] = 10
+            ws["L4"] = 30
+
+            ws.row_dimensions[3].height = 24
+            ws.row_dimensions[4].height = 20
+
+            for r in [3, 4]:
+                for c in range(1, 13):
+                    cell = ws.cell(row=r, column=c)
+                    cell.font = header_font
+                    cell.fill = header_fill
+                    cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+                    cell.border = cell_border
+
+            current_row = 5
+            for idx, app in enumerate(qs, start=1):
+                date_val = app.interaction_date.strftime("%d-%m-%Y") if app.interaction_date else "-"
+                slot_no_val = app.interaction_slot_no if app.interaction_slot_no else "-"
+                slot_time_val = app.interaction_time or "-"
+                sub_id_val = str(app.submission.id) if app.submission else (str(app.submission_id) if app.submission_id else (app.application_number or "-"))
+
+                m_val = app.evaluator_m or ""
+                mi_val = app.evaluator_mi or ""
+                cog1_val = app.cognitive_assessment_1 if app.cognitive_assessment_1 > 0 else ""
+                cog2_val = app.cognitive_assessment_2 if app.cognitive_assessment_2 > 0 else ""
+                aff_val = app.affective_assessment if app.affective_assessment > 0 else ""
+                psy_val = app.psychomotor_assessment if app.psychomotor_assessment > 0 else ""
+                total_y_val = app.total_part_y_score if app.total_part_y_score > 0 else ""
+
+                row_values = [
+                    idx,
+                    sub_id_val,
+                    date_val,
+                    slot_no_val,
+                    slot_time_val,
+                    m_val,
+                    mi_val,
+                    cog1_val,
+                    cog2_val,
+                    aff_val,
+                    psy_val,
+                    total_y_val
+                ]
+
+                ws.append(row_values)
+                ws.row_dimensions[current_row].height = 22
+                for col_idx in range(1, 13):
+                    cell = ws.cell(row=current_row, column=col_idx)
+                    cell.font = data_font
+                    cell.border = cell_border
+                    cell.alignment = Alignment(horizontal="center", vertical="center")
+
+                current_row += 1
+
+            for col in ws.columns:
+                max_len = 0
+                for cell in col:
+                    if cell.row > 2:
+                        val_str = str(cell.value or '')
+                        max_len = max(max_len, len(val_str))
+                col_letter = col[0].column_letter
+                ws.column_dimensions[col_letter].width = max(max_len + 5, 12)
+
+            ws.column_dimensions["A"].width = 8
+            ws.column_dimensions["B"].width = 20
+            ws.column_dimensions["C"].width = 16
+            ws.column_dimensions["D"].width = 10
+            ws.column_dimensions["E"].width = 24
+
+            filename = f"{filename_prefix}_{filter_date_str if filter_date_str else 'All_Dates'}_{timezone.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+            response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+            response['Content-Disposition'] = f'attachment; filename="{filename}"'
+            wb.save(response)
+            return response
+
+        elif export_type in ["submitted", "submissions", "submitted_applications"]:
             filename_prefix = "Submitted_Applications"
             qs = AdmissionApplication.objects.select_related('submission', 'submission__created_by').order_by("-created_at")
             if role != 'ADMIN' and logged_in_admin:
@@ -2696,17 +3054,24 @@ class AdminEvaluationAssessmentView(APIView):
             }, status=status.HTTP_400_BAD_REQUEST)
 
         vd = serializer.validated_data
-        final_score = save_part_y_evaluation(
-            application=application,
-            evaluator_user=logged_in_admin,
-            m_tag=vd.get('m_tag', ''),
-            mi_tag=vd.get('mi_tag', ''),
-            cognitive_1=vd.get('cognitive_assessment_1', 0.0),
-            cognitive_2=vd.get('cognitive_assessment_2', 0.0),
-            affective=vd.get('affective_assessment', 0.0),
-            psychomotor=vd.get('psychomotor_assessment', 0.0),
-            direct_part_y_score=vd.get('direct_part_y_score')
-        )
+        try:
+            final_score = save_part_y_evaluation(
+                application=application,
+                evaluator_user=logged_in_admin,
+                m_tag=vd.get('m_tag', ''),
+                mi_tag=vd.get('mi_tag', ''),
+                cognitive_1=vd.get('cognitive_assessment_1', 0.0),
+                cognitive_2=vd.get('cognitive_assessment_2', 0.0),
+                affective=vd.get('affective_assessment', 0.0),
+                psychomotor=vd.get('psychomotor_assessment', 0.0),
+                direct_part_y_score=vd.get('direct_part_y_score')
+            )
+        except ValueError as val_err:
+            return Response({
+                "status": "error",
+                "message": str(val_err)
+            }, status=status.HTTP_400_BAD_REQUEST)
+
         reward_marks = round((application.alak_malak_score or 0.0) + (application.sibling_score or 0.0), 2)
 
         return Response({
@@ -4184,13 +4549,30 @@ class AdminPrintPhysicalFormView(APIView):
             return denied
 
         is_bulk_print = "print-bulk" in request.path.lower()
+        is_bulk_download = "download-bulk" in request.path.lower() or request.query_params.get("bulk") in ["1", "true"]
         submission_id_param = request.query_params.get("submission_id")
         app_id_param = request.query_params.get("application_id") or request.query_params.get("id")
         app_no_param = request.query_params.get("application_number")
+        ids_param = request.query_params.get("ids") or request.query_params.get("application_ids")
+        sub_ids_param = request.query_params.get("submission_ids")
 
-        # STRICT SINGLE-RECORD MATCHING:
+        # 0. Bulk IDs Selection (e.g. ?ids=25,26,27 or ?submission_ids=195,196,197)
+        if is_bulk_download and (ids_param or sub_ids_param):
+            if ids_param:
+                parsed_ids = [int(i.strip()) for i in str(ids_param).split(",") if i.strip().isdigit()]
+                applications = list(AdmissionApplication.objects.select_related('evaluator', 'submission').filter(id__in=parsed_ids).order_by('merit_rank', 'id'))
+            else:
+                parsed_sub_ids = [int(i.strip()) for i in str(sub_ids_param).split(",") if i.strip().isdigit()]
+                applications = list(AdmissionApplication.objects.select_related('evaluator', 'submission').filter(submission_id__in=parsed_sub_ids).order_by('merit_rank', 'id'))
+
+            if not applications:
+                return Response({
+                    "status": "error",
+                    "message": "No admission applications found for the specified IDs."
+                }, status=status.HTTP_404_NOT_FOUND)
+
         # 1. If ?submission_id=<id> is explicitly provided, ONLY match that exact submission_id
-        if submission_id_param:
+        elif submission_id_param:
             if str(submission_id_param).isdigit():
                 app_obj = AdmissionApplication.objects.select_related('evaluator', 'submission').filter(
                     submission_id=int(submission_id_param)
@@ -4271,20 +4653,26 @@ class AdminPrintPhysicalFormView(APIView):
                 }, status=status.HTTP_404_NOT_FOUND)
             applications = [app_obj]
 
-        # 5. Bulk print is ONLY allowed on the dedicated /print-bulk/ endpoint
-        elif is_bulk_print:
+        # 5. Bulk download or print filtered by standard, medium, status
+        elif is_bulk_print or is_bulk_download:
             standard = request.query_params.get("standard")
             medium = request.query_params.get("medium")
             app_status = request.query_params.get("status", "SELECTED")
 
             applications = AdmissionApplication.objects.select_related('evaluator', 'submission').all()
-            if standard:
+            if standard and standard.lower() != "all":
                 applications = applications.filter(standard__iexact=standard)
-            if medium:
+            if medium and medium.lower() != "all":
                 applications = applications.filter(medium__iexact=medium)
             if app_status and app_status.lower() != "all":
                 applications = applications.filter(admission_status__iexact=app_status)
             applications = list(applications.order_by('merit_rank', 'application_number'))
+
+            if not applications:
+                return Response({
+                    "status": "error",
+                    "message": "No admission applications found matching the selected filters."
+                }, status=status.HTTP_404_NOT_FOUND)
         else:
             return Response({
                 "status": "error",
@@ -4581,11 +4969,11 @@ class AdminPrintPhysicalFormView(APIView):
                 "html": html_content
             }, status=status.HTTP_200_OK)
 
-        # Check if caller wants direct binary PDF download (Default when hitting /download/ or ?download=1)
+        # Check if caller wants direct binary PDF / ZIP download (Default when hitting /download/, /download-bulk/ or ?download=1)
         is_direct_pdf_download = "download" in request.path.lower() or request.query_params.get("download") in ["1", "true"]
         is_preview_requested = request.query_params.get("preview") in ["1", "true"] or request.query_params.get("no_auto_pdf") == "1"
 
-        # Generate and serve TRUE BINARY PDF directly from server with Content-Disposition: attachment
+        # Case A: Single Student Direct Binary PDF Download
         if is_direct_pdf_download and not is_preview_requested and len(applications) == 1:
             try:
                 from .pdf_generator import generate_single_student_complete_pdf_stream
@@ -4603,6 +4991,42 @@ class AdminPrintPhysicalFormView(APIView):
                 return pdf_response
             except Exception as e:
                 logger.error(f"Native PDF binary generation failed, falling back to HTML: {e}")
+
+        # Case B: Multiple Students Bulk Download (Option 1 - Clean ZIP Package of individual student PDFs)
+        elif is_direct_pdf_download and not is_preview_requested and len(applications) > 1:
+            try:
+                import io
+                import zipfile
+                from .pdf_generator import generate_single_student_complete_pdf_stream
+
+                zip_buffer = io.BytesIO()
+                with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+                    for idx, app_item in enumerate(applications):
+                        app_data = forms_data[idx] if idx < len(forms_data) else {}
+                        try:
+                            item_pdf_bytes = generate_single_student_complete_pdf_stream(app_item, app_data)
+                            app_no_c = re.sub(r'[^a-zA-Z0-9_\-]', '', str(app_item.application_number or f"SF_{app_item.id}"))
+                            name_c = re.sub(r'[^a-zA-Z0-9_\-]', '_', f"{app_item.child_first_name}_{app_item.child_surname}").strip('_')
+                            file_in_zip = f"{idx + 1:02d}_Admission_{app_no_c}_{name_c}.pdf"
+                            zip_file.writestr(file_in_zip, item_pdf_bytes)
+                        except Exception as item_err:
+                            logger.error(f"Failed to generate PDF for application {app_item.id} in bulk: {item_err}")
+
+                zip_buffer.seek(0)
+                zip_data = zip_buffer.getvalue()
+
+                # Generate clean zip filename based on criteria
+                q_std = request.query_params.get("standard") or "All"
+                q_med = request.query_params.get("medium") or "All"
+                q_st = request.query_params.get("status") or "SELECTED"
+                zip_filename = f"Shreyas_Admissions_Std_{q_std}_{q_med}_{q_st}_{len(applications)}_Students.zip"
+
+                zip_response = HttpResponse(zip_data, content_type="application/zip")
+                zip_response['Content-Disposition'] = f'attachment; filename="{zip_filename}"'
+                zip_response['Content-Length'] = len(zip_data)
+                return zip_response
+            except Exception as zip_err:
+                logger.error(f"Bulk ZIP download failed, falling back to HTML: {zip_err}")
 
         # Fallback / Preview HTML response
         response = HttpResponse(html_content, content_type="text/html; charset=utf-8")

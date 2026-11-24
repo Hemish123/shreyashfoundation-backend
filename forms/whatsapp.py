@@ -475,3 +475,104 @@ def send_whatsapp_interaction_scheduled_message(
         return {"success": False, "template": template_name, "error": str(e), "recipient": clean_phone}
 
 
+def send_whatsapp_interaction_reminder_message(
+    recipient_number: str,
+    date_str: str,
+    slot_no: int,
+    time_str: str,
+    template_name: str = "shreyas_interaction_reminder"
+) -> dict:
+    """
+    Sends WhatsApp interaction reminder notification to parents at 8:00 AM IST
+    on the day BEFORE their scheduled interaction date.
+    Meta Utility Template Parameters (3 Variables):
+    {{1}}: Date (e.g. 26/11/2026)
+    {{2}}: Slot Number (e.g. 1)
+    {{3}}: Slot Time (e.g. 9:00 AM TO 10:00 AM)
+    """
+    clean_phone = normalize_phone_number(recipient_number)
+    phone_number_id = getattr(settings, 'WHATSAPP_PHONE_NUMBER_ID', '')
+    access_token = getattr(settings, 'WHATSAPP_ACCESS_TOKEN', '')
+
+    if not phone_number_id or not access_token:
+        logger.warning("WhatsApp credentials not set in .env")
+        return {"success": False, "error": "WhatsApp credentials not set in .env"}
+
+    url = f"https://graph.facebook.com/v21.0/{phone_number_id}/messages"
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json"
+    }
+
+    payload = {
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": clean_phone,
+        "type": "template",
+        "template": {
+            "name": template_name,
+            "language": {
+                "code": "en"
+            },
+            "components": [
+                {
+                    "type": "body",
+                    "parameters": [
+                        {"type": "text", "text": str(date_str)},
+                        {"type": "text", "text": str(slot_no)},
+                        {"type": "text", "text": str(time_str)}
+                    ]
+                }
+            ]
+        }
+    }
+
+    try:
+        logger.info(
+            f"[INTERACTION REMINDER] Sending template '{template_name}' to {clean_phone} "
+            f"(Date: {date_str}, Slot: {slot_no}, Time: {time_str})..."
+        )
+        response = requests.post(url, json=payload, headers=headers, timeout=10)
+        try:
+            res_data = response.json()
+        except Exception:
+            res_data = response.text
+
+        logger.info(f"Interaction Reminder response for {clean_phone}: status {response.status_code} - {res_data}")
+
+        if response.status_code == 200:
+            msg_id = ""
+            if isinstance(res_data, dict) and res_data.get("messages"):
+                msg_id = res_data["messages"][0].get("id", "")
+
+            if msg_id:
+                record_whatsapp_message_status(
+                    message_id=msg_id,
+                    status_val="sent",
+                    recipient=clean_phone,
+                    template_name=template_name
+                )
+
+            # Log into CRM SaaS asynchronously
+            trigger_saas_crm_template(
+                phone=clean_phone,
+                template_name=template_name,
+                parameters={
+                    "1": str(date_str),
+                    "2": str(slot_no),
+                    "3": str(time_str)
+                },
+                language="en",
+                message_id=msg_id
+            )
+
+            return {"success": True, "template": template_name, "data": res_data, "recipient": clean_phone, "message_id": msg_id}
+        else:
+            logger.error(f"Interaction Reminder failed for {clean_phone}: {res_data}")
+            return {"success": False, "template": template_name, "error": res_data, "recipient": clean_phone}
+    except Exception as e:
+        logger.error(f"Interaction Reminder exception: {str(e)}")
+        return {"success": False, "template": template_name, "error": str(e), "recipient": clean_phone}
+
+
+

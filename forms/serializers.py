@@ -690,22 +690,126 @@ class AdmissionApplicationSerializer(serializers.ModelSerializer):
 
 class EvaluationAssessmentSerializer(serializers.Serializer):
     """
-    Serializer for Admin / Academicians filling Part Y Assessment (Out of 30 Marks).
-    Supports EITHER:
-    1. A single direct field out of 30 marks: `part_y_score` (or `total_part_y_score` or `marks`)
-    2. OR breakdown fields: `cognitive_assessment_1` (5) + `cognitive_assessment_2` (5) + `affective_assessment` (10) + `psychomotor_assessment` (10)
+    Serializer for Admin / Academicians filling PARAMETERS OF ASSESSMENT – PART Y (Total 30 Marks):
+    Columns according to Shreyas Assessment Chart:
+    - M (evaluator_m): String note / tag
+    - MI (evaluator_mi): String note / tag
+    - Cognitive Assessment Part 1: Max 5 Marks
+    - Cognitive Assessment Part 2: Max 5 Marks
+    - Affective Assessment: Max 10 Marks
+    - Psychomotor Assessment: Max 10 Marks
+    Total Part Y: Exactly 30 Marks (5 + 5 + 10 + 10 = 30)
     """
-    part_y_score = serializers.FloatField(required=False, min_value=0.0, max_value=30.0)
+    m_tag = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        default="",
+        help_text="M assessment tag/notes"
+    )
+    evaluator_m = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        default="",
+        help_text="Alias for m_tag"
+    )
+    mi_tag = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        default="",
+        help_text="MI assessment tag/notes"
+    )
+    evaluator_mi = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        default="",
+        help_text="Alias for mi_tag"
+    )
+
+    cognitive_assessment_1 = serializers.FloatField(
+        required=False,
+        default=0.0,
+        min_value=0.0,
+        max_value=5.0,
+        error_messages={
+            'min_value': "Cognitive Assessment 1 cannot be less than 0.",
+            'max_value': "Cognitive Assessment 1 cannot exceed 5 marks."
+        }
+    )
+    cognitive_assessment_2 = serializers.FloatField(
+        required=False,
+        default=0.0,
+        min_value=0.0,
+        max_value=5.0,
+        error_messages={
+            'min_value': "Cognitive Assessment 2 cannot be less than 0.",
+            'max_value': "Cognitive Assessment 2 cannot exceed 5 marks."
+        }
+    )
+    affective_assessment = serializers.FloatField(
+        required=False,
+        default=0.0,
+        min_value=0.0,
+        max_value=10.0,
+        error_messages={
+            'min_value': "Affective Assessment cannot be less than 0.",
+            'max_value': "Affective Assessment cannot exceed 10 marks."
+        }
+    )
+    psychomotor_assessment = serializers.FloatField(
+        required=False,
+        default=0.0,
+        min_value=0.0,
+        max_value=10.0,
+        error_messages={
+            'min_value': "Psychomotor Assessment cannot be less than 0.",
+            'max_value': "Psychomotor Assessment cannot exceed 10 marks."
+        }
+    )
+
+    # Optional direct total field (0 to 30) if admin enters total score directly
+    part_y_score = serializers.FloatField(
+        required=False,
+        min_value=0.0,
+        max_value=30.0,
+        error_messages={
+            'min_value': "Part Y Score cannot be less than 0.",
+            'max_value': "Part Y Score cannot exceed 30 marks."
+        }
+    )
     total_part_y_score = serializers.FloatField(required=False, min_value=0.0, max_value=30.0)
     marks = serializers.FloatField(required=False, min_value=0.0, max_value=30.0)
-    m_tag = serializers.CharField(required=False, allow_blank=True, default="")
-    mi_tag = serializers.CharField(required=False, allow_blank=True, default="")
-    cognitive_assessment_1 = serializers.FloatField(required=False, default=0.0, min_value=0.0, max_value=5.0)
-    cognitive_assessment_2 = serializers.FloatField(required=False, default=0.0, min_value=0.0, max_value=5.0)
-    affective_assessment = serializers.FloatField(required=False, default=0.0, min_value=0.0, max_value=10.0)
-    psychomotor_assessment = serializers.FloatField(required=False, default=0.0, min_value=0.0, max_value=10.0)
 
     def validate(self, attrs):
+        errors = {}
+
+        # Merge alias fields if provided
+        m_val = attrs.get('m_tag') or attrs.get('evaluator_m', '')
+        mi_val = attrs.get('mi_tag') or attrs.get('evaluator_mi', '')
+        attrs['m_tag'] = m_val
+        attrs['mi_tag'] = mi_val
+
+        cog1 = attrs.get('cognitive_assessment_1')
+        cog2 = attrs.get('cognitive_assessment_2')
+        aff = attrs.get('affective_assessment')
+        psy = attrs.get('psychomotor_assessment')
+
+        if cog1 is not None and (cog1 < 0.0 or cog1 > 5.0):
+            errors['cognitive_assessment_1'] = f"Cognitive Assessment 1 must be between 0 and 5 marks (entered: {cog1})."
+
+        if cog2 is not None and (cog2 < 0.0 or cog2 > 5.0):
+            errors['cognitive_assessment_2'] = f"Cognitive Assessment 2 must be between 0 and 5 marks (entered: {cog2})."
+
+        if aff is not None and (aff < 0.0 or aff > 10.0):
+            errors['affective_assessment'] = f"Affective Assessment must be between 0 and 10 marks (entered: {aff})."
+
+        if psy is not None and (psy < 0.0 or psy > 10.0):
+            errors['psychomotor_assessment'] = f"Psychomotor Assessment must be between 0 and 10 marks (entered: {psy})."
+
+        # Check total sum if individual domains are provided
+        individual_sum = round(float(cog1 or 0.0) + float(cog2 or 0.0) + float(aff or 0.0) + float(psy or 0.0), 2)
+        if individual_sum > 30.0:
+            errors['total'] = f"Total Part Y marks cannot exceed 30. Current sum: {individual_sum}/30 (Cog1: {cog1}, Cog2: {cog2}, Aff: {aff}, Psy: {psy})."
+
         direct_val = (
             attrs.get('part_y_score')
             if attrs.get('part_y_score') is not None
@@ -715,15 +819,20 @@ class EvaluationAssessmentSerializer(serializers.Serializer):
                 else attrs.get('marks')
             )
         )
+
         has_breakdown = any(
             k in self.initial_data
             for k in ['cognitive_assessment_1', 'cognitive_assessment_2', 'affective_assessment', 'psychomotor_assessment']
         )
+
         if direct_val is None and not has_breakdown:
-            raise serializers.ValidationError({
-                "part_y_score": "Please provide 'part_y_score' (0 to 30) or assessment domain marks."
-            })
+            errors['part_y_score'] = "Please provide individual parameter marks (Cognitive 5+5, Affective 10, Psychomotor 10) or direct 'part_y_score' (0 to 30)."
+
+        if errors:
+            raise serializers.ValidationError(errors)
+
         attrs['direct_part_y_score'] = direct_val
+        attrs['calculated_sum'] = individual_sum
         return attrs
 
 

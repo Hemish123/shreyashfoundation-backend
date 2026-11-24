@@ -120,32 +120,54 @@ def save_part_y_evaluation(
     direct_part_y_score: Optional[float] = None
 ) -> float:
     """
-    Saves PART Y Assessment (Total 30 Marks) from Admin Panel:
-    Supports EITHER:
-    - A single direct Part Y score field out of 30 (direct_part_y_score / part_y_score / marks)
-    - OR domain breakdown: Cognitive 1 (5) + Cognitive 2 (5) + Affective (10) + Psychomotor (10) = 30
-    Then aggregates:
-    Final Merit Score = Part X (Quiz out of 50) + Part Y (out of 30) + Reward Marks (Alak Malak + Sibling VK out of 13)
+    Saves PARAMETERS OF ASSESSMENT – PART Y (Total 30 Marks) from Admin Panel:
+    Parameters as per Shreyas Assessment Chart:
+      - M (evaluator_m): String note / tag
+      - MI (evaluator_mi): String note / tag
+      - Cognitive Assessment 1: 0 to 5 Marks
+      - Cognitive Assessment 2: 0 to 5 Marks
+      - Affective Assessment: 0 to 10 Marks
+      - Psychomotor Assessment: 0 to 10 Marks
+    Total Part Y: 30 Marks Max (5 + 5 + 10 + 10 = 30)
+
+    Strict Validation:
+      - Enforces domain bounds and raises ValueError on invalid inputs.
     """
-    cog1 = min(max(float(cognitive_1 or 0), 0.0), 5.0)
-    cog2 = min(max(float(cognitive_2 or 0), 0.0), 5.0)
-    aff = min(max(float(affective or 0), 0.0), 10.0)
-    psy = min(max(float(psychomotor or 0), 0.0), 10.0)
+    # Strict bounds validation
+    cog1 = float(cognitive_1 or 0.0)
+    cog2 = float(cognitive_2 or 0.0)
+    aff = float(affective or 0.0)
+    psy = float(psychomotor or 0.0)
+
+    if not (0.0 <= cog1 <= 5.0):
+        raise ValueError(f"Cognitive Assessment 1 must be between 0 and 5 marks (provided: {cog1})")
+    if not (0.0 <= cog2 <= 5.0):
+        raise ValueError(f"Cognitive Assessment 2 must be between 0 and 5 marks (provided: {cog2})")
+    if not (0.0 <= aff <= 10.0):
+        raise ValueError(f"Affective Assessment must be between 0 and 10 marks (provided: {aff})")
+    if not (0.0 <= psy <= 10.0):
+        raise ValueError(f"Psychomotor Assessment must be between 0 and 10 marks (provided: {psy})")
 
     if direct_part_y_score is not None:
-        total_y = round(min(max(float(direct_part_y_score), 0.0), 30.0), 2)
+        direct_val = float(direct_part_y_score)
+        if not (0.0 <= direct_val <= 30.0):
+            raise ValueError(f"Direct Part Y Score must be between 0 and 30 marks (provided: {direct_val})")
+        total_y = round(direct_val, 2)
     else:
         total_y = round(cog1 + cog2 + aff + psy, 2)
+        if total_y > 30.0:
+            raise ValueError(f"Sum of assessment domains cannot exceed 30 marks (sum: {total_y}/30)")
 
     application.evaluator = evaluator_user
     if m_tag is not None:
-        application.evaluator_m = m_tag
+        application.evaluator_m = str(m_tag).strip()
     if mi_tag is not None:
-        application.evaluator_mi = mi_tag
-    application.cognitive_assessment_1 = cog1
-    application.cognitive_assessment_2 = cog2
-    application.affective_assessment = aff
-    application.psychomotor_assessment = psy
+        application.evaluator_mi = str(mi_tag).strip()
+
+    application.cognitive_assessment_1 = round(cog1, 2)
+    application.cognitive_assessment_2 = round(cog2, 2)
+    application.affective_assessment = round(aff, 2)
+    application.psychomotor_assessment = round(psy, 2)
     application.total_part_y_score = total_y
 
     # Ensure Part X (Quiz out of 50) and Reward Marks (out of 13) are up-to-date

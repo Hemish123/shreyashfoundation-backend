@@ -11,6 +11,7 @@ from .views import (
     ForgotPinRequestOTPView,
     ForgotPinVerifyAndResetView,
     AdminInteractionCalendarView,
+    AdminTriggerInteractionReminderView,
     AdminExportDataView,
     AdminAuditLogView,
     AdminEvaluationAssessmentView,
@@ -36,6 +37,7 @@ urlpatterns = [
 
     # Step 1: Interaction Calendar for Admin
     path('admin/interaction-calendar/', AdminInteractionCalendarView.as_view(), name='admin-interaction-calendar'),
+    path('admin/interaction-reminders/trigger/', AdminTriggerInteractionReminderView.as_view(), name='admin-trigger-interaction-reminder'),
 
     # Step 2 & 3: Digital Assessment Form for Academicians & Educators
     path('admin/evaluation/<int:application_id>/', AdminEvaluationAssessmentView.as_view(), name='admin-evaluation-assessment'),
@@ -48,6 +50,7 @@ urlpatterns = [
     path('admin/applications/<str:application_id>/print/', AdminPrintPhysicalFormView.as_view(), name='admin-print-application'),
     path('admin/applications/<str:application_id>/download/', AdminPrintPhysicalFormView.as_view(), name='admin-download-application'),
     path('admin/applications/download/', AdminPrintPhysicalFormView.as_view(), name='admin-download-application-query'),
+    path('admin/applications/download-bulk/', AdminPrintPhysicalFormView.as_view(), name='admin-download-bulk'),
     path('admin/applications/print-bulk/', AdminPrintPhysicalFormView.as_view(), name='admin-print-bulk'),
 
     # Step 8: Academic Year Archival & Rollover
