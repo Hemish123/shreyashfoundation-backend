@@ -3152,7 +3152,10 @@ class AdminMeritBoardView(APIView):
 
         standard = (request.query_params.get("standard") or "").strip()
         medium = (request.query_params.get("medium") or "").strip()
-        cutoff_seats = int(request.query_params.get("cutoff") or 80)
+        
+        # Cutoff can be dynamically passed from the UI cutoff input box (e.g. ?cutoff=80)
+        cutoff_param = request.query_params.get("cutoff")
+        cutoff_seats = int(cutoff_param) if (cutoff_param and str(cutoff_param).strip().isdigit()) else 80
         recompute = request.query_params.get("recompute", "true").lower() in ["true", "1", "yes"]
 
         # Additional UI Filter Parameters (Status & Global Search)
@@ -3166,7 +3169,7 @@ class AdminMeritBoardView(APIView):
             ranked_apps = AdmissionApplication.objects.select_related('submission').filter(
                 standard__iexact=standard,
                 medium__iexact=medium
-            ).exclude(admission_status__in=['CANCELLED', 'REJECTED']).order_by('merit_rank', '-final_aggregate_score')
+            ).exclude(admission_status__in=['CANCELLED', 'REJECTED']).order_by('-final_aggregate_score', 'merit_rank', 'created_at')
         else:
             # If "All Standards" or "All Mediums" is selected, rank across all standard x medium pairs
             all_pairs = AdmissionApplication.objects.values_list('standard', 'medium').distinct()

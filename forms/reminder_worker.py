@@ -188,16 +188,17 @@ def send_due_interaction_reminders(target_date: date = None) -> dict:
 
 def _check_and_trigger_daily_interaction_reminder():
     """
-    Runs every loop iteration. If the current time in IST is >= 8:00 AM
-    and today's run has not yet been executed, triggers interaction reminders
-    for tomorrow's scheduled interactions.
+    Runs every loop iteration.
+    Triggers interaction reminders for tomorrow's scheduled interactions
+    daily at 8:00 AM IST.
     """
     global _last_interaction_reminder_date
     now_ist = datetime.now(IST)
     today_date = now_ist.date()
 
-    # Trigger window: at or after 08:00 AM IST
-    if now_ist.hour >= 8:
+    # Trigger window: at or after 8:00 AM IST (08:00)
+    is_trigger_time = (now_ist.hour >= 8)
+    if is_trigger_time:
         if _last_interaction_reminder_date != today_date:
             logger.info(f"[INTERACTION REMINDER] It is {now_ist.strftime('%H:%M:%S')} IST on {today_date}. Triggering 8:00 AM reminder check...")
             try:
