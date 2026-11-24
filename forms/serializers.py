@@ -843,11 +843,13 @@ class MeritRankBoardSerializer(serializers.ModelSerializer):
     quiz_score = serializers.SerializerMethodField()
     mcq_score = serializers.SerializerMethodField()
     reward_marks = serializers.SerializerMethodField()
+    submission_id = serializers.SerializerMethodField()
 
     class Meta:
         model = AdmissionApplication
         fields = [
             'id',
+            'submission_id',
             'application_number',
             'merit_rank',
             'student_name',
@@ -899,4 +901,7 @@ class MeritRankBoardSerializer(serializers.ModelSerializer):
 
     def get_reward_marks(self, obj):
         return round(float(obj.alak_malak_score or 0.0) + float(obj.sibling_score or 0.0), 2)
+
+    def get_submission_id(self, obj):
+        return obj.submission_id or (obj.submission.id if obj.submission else None)
 
