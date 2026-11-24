@@ -158,7 +158,7 @@ def send_due_interaction_reminders(target_date: date = None) -> dict:
                 date_str=date_formatted,
                 slot_no=slot_no,
                 time_str=slot_time,
-                template_name="shreyas_interaction_reminder"
+                template_name="shreyas_interaction_reminder__"
             )
 
             if res.get("success"):

@@ -482,7 +482,7 @@ def send_whatsapp_interaction_reminder_message(
     date_str: str,
     slot_no: int,
     time_str: str,
-    template_name: str = "shreyas_interaction_reminder"
+    template_name: str = "shreyas_interaction_reminder__"
 ) -> dict:
     """
     Sends WhatsApp interaction reminder notification to parents at 8:00 AM IST
