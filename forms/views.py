@@ -824,7 +824,25 @@ class AdminInteractionCalendarView(APIView):
                 app_no_val = str(app.application_number or f"SF_{app.id}")
 
                 m_val = app.evaluator_m or ""
-                mi_val = app.evaluator_mi or app.past_illness or ""
+
+                # Determine MI value: if evaluator_mi is provided, use it; otherwise check past_illness (Yes/No)
+                if app.evaluator_mi:
+                    mi_val = app.evaluator_mi
+                else:
+                    raw_illness = (app.past_illness or "").strip().lower()
+                    # Remove common punctuation like dots, dashes, commas, slashes
+                    cleaned_illness = re.sub(r"[\s\.\-_/\\,;:!]+", "", raw_illness)
+                    negatives = {
+                        "", "none", "no", "na", "nil", "null", "not", "nothing", "nope",
+                        "noone", "notany", "noillness", "noissue", "noissues", "notapplicable",
+                        "never", "good", "fine", "ok", "normal", "healthy", "fit", "allgood",
+                        "નથી", "કોઈનથી", "કંઈનથી", "ના", "કઈનથી", "કશુનથી", "કશુંનથી",
+                        "નહિ", "નહી", "બરાબર", "સાજુ", "સાજું", "તંદુરસ્ત"
+                    }
+                    if not cleaned_illness or cleaned_illness in negatives or raw_illness in negatives or "નથી" in raw_illness or "no illness" in raw_illness:
+                        mi_val = "No"
+                    else:
+                        mi_val = "Yes"
                 cog1_val = app.cognitive_assessment_1 if app.cognitive_assessment_1 > 0 else ""
                 cog2_val = app.cognitive_assessment_2 if app.cognitive_assessment_2 > 0 else ""
                 aff_val = app.affective_assessment if app.affective_assessment > 0 else ""
@@ -1108,7 +1126,25 @@ class AdminExportDataView(APIView):
                 app_no_val = str(app.application_number or f"SF_{app.id}")
 
                 m_val = app.evaluator_m or ""
-                mi_val = app.evaluator_mi or app.past_illness or ""
+
+                # Determine MI value: if evaluator_mi is provided, use it; otherwise check past_illness (Yes/No)
+                if app.evaluator_mi:
+                    mi_val = app.evaluator_mi
+                else:
+                    raw_illness = (app.past_illness or "").strip().lower()
+                    # Remove common punctuation like dots, dashes, commas, slashes
+                    cleaned_illness = re.sub(r"[\s\.\-_/\\,;:!]+", "", raw_illness)
+                    negatives = {
+                        "", "none", "no", "na", "nil", "null", "not", "nothing", "nope",
+                        "noone", "notany", "noillness", "noissue", "noissues", "notapplicable",
+                        "never", "good", "fine", "ok", "normal", "healthy", "fit", "allgood",
+                        "નથી", "કોઈનથી", "કંઈનથી", "ના", "કઈનથી", "કશુનથી", "કશુંનથી",
+                        "નહિ", "નહી", "બરાબર", "સાજુ", "સાજું", "તંદુરસ્ત"
+                    }
+                    if not cleaned_illness or cleaned_illness in negatives or raw_illness in negatives or "નથી" in raw_illness or "no illness" in raw_illness:
+                        mi_val = "No"
+                    else:
+                        mi_val = "Yes"
                 cog1_val = app.cognitive_assessment_1 if app.cognitive_assessment_1 > 0 else ""
                 cog2_val = app.cognitive_assessment_2 if app.cognitive_assessment_2 > 0 else ""
                 aff_val = app.affective_assessment if app.affective_assessment > 0 else ""
