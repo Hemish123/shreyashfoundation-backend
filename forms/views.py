@@ -824,7 +824,7 @@ class AdminInteractionCalendarView(APIView):
                 app_no_val = str(app.application_number or f"SF_{app.id}")
 
                 m_val = app.evaluator_m or ""
-                mi_val = app.evaluator_mi or ""
+                mi_val = app.evaluator_mi or app.past_illness or ""
                 cog1_val = app.cognitive_assessment_1 if app.cognitive_assessment_1 > 0 else ""
                 cog2_val = app.cognitive_assessment_2 if app.cognitive_assessment_2 > 0 else ""
                 aff_val = app.affective_assessment if app.affective_assessment > 0 else ""
@@ -1108,7 +1108,7 @@ class AdminExportDataView(APIView):
                 app_no_val = str(app.application_number or f"SF_{app.id}")
 
                 m_val = app.evaluator_m or ""
-                mi_val = app.evaluator_mi or ""
+                mi_val = app.evaluator_mi or app.past_illness or ""
                 cog1_val = app.cognitive_assessment_1 if app.cognitive_assessment_1 > 0 else ""
                 cog2_val = app.cognitive_assessment_2 if app.cognitive_assessment_2 > 0 else ""
                 aff_val = app.affective_assessment if app.affective_assessment > 0 else ""
