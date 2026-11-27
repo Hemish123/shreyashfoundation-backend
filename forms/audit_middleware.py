@@ -1,5 +1,6 @@
 import json
 import logging
+from django.http import JsonResponse
 from django.utils.deprecation import MiddlewareMixin
 from .models import AuditLog, AdminUser
 
@@ -7,9 +8,27 @@ logger = logging.getLogger(__name__)
 
 class AuditLogMiddleware(MiddlewareMixin):
     """
-    Middleware that captures all /api/ calls and creates an AuditLog record.
-    Identifies logged-in Admin/Staff via headers or session.
+    Middleware that:
+    1. Strictly blocks SURVEY-scoped JWT tokens from accessing any non-survey /api/* endpoint (403 Forbidden).
+    2. Captures /api/ calls and creates an AuditLog record.
     """
+    def process_request(self, request):
+        if request.path.startswith('/api/') and not request.path.startswith('/api/survey/'):
+            auth_header = request.headers.get('Authorization') or request.META.get('HTTP_AUTHORIZATION') or ""
+            query_token = (request.GET.get('token') or request.GET.get('access_token') or "").strip()
+            candidate_token = auth_header if auth_header.lower().startswith('bearer ') else query_token
+            if candidate_token:
+                from .jwt_auth import get_survey_user_from_token
+                if get_survey_user_from_token(candidate_token):
+                    return JsonResponse(
+                        {
+                            "status": "error",
+                            "message": "Access forbidden. SURVEY role tokens cannot access admission or admin endpoints.",
+                        },
+                        status=403,
+                    )
+        return None
+
     def process_response(self, request, response):
         # Only log /api/ requests
         if not request.path.startswith('/api/'):
@@ -33,12 +52,18 @@ class AuditLogMiddleware(MiddlewareMixin):
         actor_role = "GUEST"
 
         if auth_header and auth_header.lower().startswith('bearer '):
-            from .jwt_auth import get_admin_user_from_token
-            jwt_user = get_admin_user_from_token(auth_header)
-            if jwt_user:
-                actor_username = jwt_user.username
-                actor_email = jwt_user.email
-                actor_role = jwt_user.role
+            from .jwt_auth import get_admin_user_from_token, get_survey_user_from_token
+            survey_user = get_survey_user_from_token(auth_header)
+            if survey_user:
+                actor_username = survey_user["username"]
+                actor_email = survey_user["email"]
+                actor_role = survey_user["role"]
+            else:
+                jwt_user = get_admin_user_from_token(auth_header)
+                if jwt_user:
+                    actor_username = jwt_user.username
+                    actor_email = jwt_user.email
+                    actor_role = jwt_user.role
 
         if not actor_email and (actor_username or request.headers.get('X-Admin-Email')):
             user = AdminUser.objects.filter(

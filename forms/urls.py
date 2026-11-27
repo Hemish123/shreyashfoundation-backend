@@ -3,6 +3,8 @@ from .views import (
     SubmitQuizView,
     VerifyPaymentAndSendWhatsAppView,
     AdmissionFormEligibilityCheckView,
+    AdmissionFormSendOTPView,
+    AdmissionFormVerifyOTPView,
     AdmissionFormAutoSaveDraftView,
     AdmissionApplicationView,
     AdminUserManagementView,
@@ -22,6 +24,13 @@ from .views import (
     AdminAcademicYearRollView,
     AdminProxyDownloadView,
     WhatsAppWebhookView
+)
+from .survey_views import (
+    SurveyLoginView,
+    SurveyResponsesView,
+    SurveyInvitesView,
+    SurveyInviteDetailView,
+    SurveyInviteResendView,
 )
 
 urlpatterns = [
@@ -75,11 +84,20 @@ urlpatterns = [
     path('add-enquiry/', SubmitQuizView.as_view(), name='add-enquiry'),
     path('verify-payment/', VerifyPaymentAndSendWhatsAppView.as_view(), name='verify-payment'),
 
-    # Admission Form & Auto-save Draft
+    # Admission Form & Auto-save Draft (OTP-gated)
     path('admission-form/check-eligibility/', AdmissionFormEligibilityCheckView.as_view(), name='check-form-eligibility'),
+    path('admission-form/send-otp/', AdmissionFormSendOTPView.as_view(), name='admission-form-send-otp'),
+    path('admission-form/verify-otp/', AdmissionFormVerifyOTPView.as_view(), name='admission-form-verify-otp'),
     path('admission-form/autosave/', AdmissionFormAutoSaveDraftView.as_view(), name='admission-form-autosave'),
     path('admission-form/', AdmissionApplicationView.as_view(), name='admission-form'),
 
     # WhatsApp SaaS & Meta Two-Way Webhook (Single Universal URL)
     path('whatsapp/webhook/', WhatsAppWebhookView.as_view(), name='whatsapp-webhook'),
+
+    # Isolated Staff Survey APIs
+    path('survey/login/', SurveyLoginView.as_view(), name='survey-login'),
+    path('survey/responses/', SurveyResponsesView.as_view(), name='survey-responses'),
+    path('survey/invites/', SurveyInvitesView.as_view(), name='survey-invites'),
+    path('survey/invites/<int:invite_id>/resend/', SurveyInviteResendView.as_view(), name='survey-invite-resend'),
+    path('survey/invites/<int:invite_id>/', SurveyInviteDetailView.as_view(), name='survey-invite-detail'),
 ]

@@ -88,6 +88,12 @@ class QuizSubmission(models.Model):
     admission_form_draft = models.JSONField(default=dict, blank=True, help_text="Auto-saved draft state for admission form")
     last_draft_saved_at = models.DateTimeField(null=True, blank=True, help_text="Timestamp when draft was last autosaved")
 
+    # WhatsApp OTP Verification before accessing Admission Form
+    form_otp_code = models.CharField(max_length=10, blank=True, null=True, help_text="6-digit OTP sent to WhatsApp before opening admission form")
+    form_otp_expires_at = models.DateTimeField(null=True, blank=True, help_text="Expiry timestamp for admission form OTP")
+    form_otp_verified = models.BooleanField(default=False, help_text="Whether parent verified OTP to access the admission form")
+    form_otp_verified_at = models.DateTimeField(null=True, blank=True, help_text="Timestamp when parent verified admission form OTP")
+
     created_by = models.ForeignKey(
         'AdminUser',
         on_delete=models.SET_NULL,
@@ -395,5 +401,49 @@ class AuditLog(models.Model):
 
     def __str__(self):
         return f"[{self.created_at}] {self.actor_username} ({self.actor_role}) - {self.method} {self.endpoint} [{self.response_status}]"
+
+
+class SurveyResponse(models.Model):
+    """
+    Anonymous staff survey responses (Q01-Q28).
+    Completely isolated from SurveyInvite (no FK, no name/phone column) to guarantee anonymity.
+    """
+    LANGUAGE_CHOICES = [
+        ('en', 'English'),
+        ('gu', 'Gujarati'),
+    ]
+
+    language = models.CharField(max_length=10, choices=LANGUAGE_CHOICES, default='en')
+    department_value = models.CharField(max_length=255, db_index=True)
+    answers = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'survey_responses'
+        ordering = ['-id']
+
+    def __str__(self):
+        return f"SurveyResponse #{self.id} ({self.department_value}, {self.language})"
+
+
+class SurveyInvite(models.Model):
+    """
+    Log of WhatsApp survey link invites sent to staff members.
+    Completely separate from SurveyResponse.
+    """
+    name = models.CharField(max_length=255)
+    phone = models.CharField(max_length=20)
+    send_count = models.PositiveIntegerField(default=1)
+    sent_at = models.DateTimeField(auto_now_add=True)
+    last_sent_at = models.DateTimeField(auto_now_add=True)
+    whatsapp_status = models.CharField(max_length=30, default='PENDING')
+
+    class Meta:
+        db_table = 'survey_invites'
+        ordering = ['-last_sent_at', '-id']
+
+    def __str__(self):
+        return f"{self.name} ({self.phone}) - {self.whatsapp_status} (x{self.send_count})"
+
 
 

@@ -2168,9 +2168,141 @@ class VerifyPaymentAndSendWhatsAppView(APIView):
 # Admission Form & Pre-fill 
 # ==============================================================================
 
+ADMISSION_FORM_OTP_TTL_SECONDS = 600  # 10 minutes
+ADMISSION_FORM_OTP_RESEND_COOLDOWN_SECONDS = 60
+
+
+def _extract_form_access_token(request) -> str:
+    token = (
+        request.headers.get("X-Form-Token")
+        or request.META.get("HTTP_X_FORM_TOKEN")
+        or request.query_params.get("form_access_token")
+        or ""
+    ).strip()
+    if token:
+        return token
+    auth_header = (request.headers.get("Authorization") or request.META.get("HTTP_AUTHORIZATION") or "").strip()
+    if auth_header.lower().startswith("bearer "):
+        return auth_header
+    if hasattr(request, "data") and isinstance(request.data, dict):
+        body_token = str(request.data.get("form_access_token") or "").strip()
+        if body_token:
+            return body_token
+    return ""
+
+
+def _is_submission_otp_verified(request, submission: QuizSubmission) -> bool:
+    if submission.form_otp_verified:
+        return True
+    from .jwt_auth import verify_form_access_token
+    token = _extract_form_access_token(request)
+    if token and verify_form_access_token(token, expected_submission_id=submission.id):
+        return True
+    return False
+
+
+def _build_eligible_form_payload(submission: QuizSubmission) -> dict:
+    return {
+        "status": "success",
+        "can_fill_form": True,
+        "otp_required": False,
+        "otp_verified": True,
+        "already_submitted": False,
+        "submission_id": submission.id,
+        "language": submission.language or "en",
+        "score": submission.score,
+        "tag": submission.tag,
+        "vibhag": submission.vibhag,
+        "message": "Eligible to fill admission form.",
+        "draft_saved_at": submission.last_draft_saved_at,
+        "saved_draft": submission.admission_form_draft or {},
+        "saved_quiz_draft": submission.quiz_draft_answers or {},
+        "prefilled_data": {
+            "standard": submission.standard,
+            "medium": submission.medium,
+            "vibhag": submission.vibhag,
+            "parent_name": submission.parent_name,
+            "father_name": submission.parent_name,
+            "student_name": submission.child_name,
+            "child_name": submission.child_name,
+            "child_first_name": submission.child_name,
+            "surname": submission.surname,
+            "child_surname": submission.surname,
+            "father_surname": submission.surname,
+            "mother_surname": submission.surname,
+            "whatsapp_number": submission.whatsapp_number,
+            "father_whatsapp": submission.whatsapp_number,
+            "mother_whatsapp": submission.whatsapp_number,
+            "email": submission.email,
+            "father_email": submission.email,
+            "mother_email": submission.email,
+            "language": submission.language or "gu",
+            "is_locked_for_user": True,
+        },
+    }
+
+
+def _issue_and_send_form_otp(submission: QuizSubmission, force_resend: bool = False) -> dict:
+    import secrets
+    from datetime import timedelta
+    from .whatsapp import mask_phone_number, send_whatsapp_otp_template
+
+    now = timezone.now()
+    phone = (submission.whatsapp_number or "").strip()
+    masked_phone = mask_phone_number(phone) if phone else ""
+
+    if not phone:
+        return {
+            "otp_sent": False,
+            "already_sent_recently": False,
+            "masked_phone": "",
+            "otp_expires_in_seconds": 0,
+            "error": "No WhatsApp number is registered for this submission.",
+        }
+
+    # Avoid duplicate sends on rapid page reloads / React StrictMode double-fetches
+    if (
+        not force_resend
+        and submission.form_otp_code
+        and submission.form_otp_expires_at
+        and submission.form_otp_expires_at > now + timedelta(
+            seconds=ADMISSION_FORM_OTP_TTL_SECONDS - ADMISSION_FORM_OTP_RESEND_COOLDOWN_SECONDS
+        )
+    ):
+        remaining = max(1, int((submission.form_otp_expires_at - now).total_seconds()))
+        return {
+            "otp_sent": True,
+            "already_sent_recently": True,
+            "masked_phone": masked_phone,
+            "otp_expires_in_seconds": remaining,
+        }
+
+    otp_code = f"{secrets.randbelow(900000) + 100000}"
+    submission.form_otp_code = otp_code
+    submission.form_otp_expires_at = now + timedelta(seconds=ADMISSION_FORM_OTP_TTL_SECONDS)
+    submission.save(update_fields=["form_otp_code", "form_otp_expires_at"])
+
+    wa_result = send_whatsapp_otp_template(
+        recipient_number=phone,
+        otp_code=otp_code,
+        submission_id=submission.id,
+    )
+
+    return {
+        "otp_sent": bool(wa_result.get("success")),
+        "already_sent_recently": False,
+        "masked_phone": masked_phone,
+        "otp_expires_in_seconds": ADMISSION_FORM_OTP_TTL_SECONDS,
+        "template": wa_result.get("template", ""),
+        "whatsapp_result": wa_result,
+    }
+
+
 class AdmissionFormEligibilityCheckView(APIView):
     """
     Check if a submission_id is eligible, paid, and hasn't already submitted before opening form.
+    When link is opened and OTP is not yet verified, automatically sends a WhatsApp OTP via
+    the OTP template and returns status='otp_required' until verified.
     GET /api/admission-form/check-eligibility/?submission_id=1
     """
     def get(self, request):
@@ -2193,10 +2325,39 @@ class AdmissionFormEligibilityCheckView(APIView):
                 "message": f"Quiz submission {submission_id} does not exist."
             }, status=status.HTTP_404_NOT_FOUND)
 
+        # OTP Gate FIRST: For ANY valid submission_id, send OTP to its registered WhatsApp number
+        # as soon as the link is opened if not yet verified.
+        if not _is_submission_otp_verified(request, submission):
+            resend_flag = str(request.query_params.get("resend", "")).lower() in ("1", "true", "yes")
+            otp_info = _issue_and_send_form_otp(submission, force_resend=resend_flag)
+            logger.info(
+                f"[GET /api/admission-form/check-eligibility/] Submission {submission_id} requires OTP verification "
+                f"(otp_sent={otp_info.get('otp_sent')}, masked_phone={otp_info.get('masked_phone')})."
+            )
+            return Response({
+                "status": "otp_required",
+                "otp_required": True,
+                "otp_verified": False,
+                "can_fill_form": False,
+                "already_submitted": False,
+                "submission_id": submission.id,
+                "language": submission.language or "en",
+                "masked_phone": otp_info.get("masked_phone", ""),
+                "otp_sent": otp_info.get("otp_sent", False),
+                "otp_expires_in_seconds": otp_info.get("otp_expires_in_seconds", ADMISSION_FORM_OTP_TTL_SECONDS),
+                "message": (
+                    "OTP has been sent to your registered WhatsApp number. Please verify OTP to access the admission form."
+                    if otp_info.get("otp_sent")
+                    else otp_info.get("error", "Unable to send OTP to your WhatsApp number. Please try resending.")
+                ),
+            }, status=status.HTTP_200_OK)
+
         if submission.payment_status != "RECEIVED":
             logger.warning(f"[GET /api/admission-form/check-eligibility/] Submission {submission_id} payment is {submission.payment_status}.")
             return Response({
                 "status": "error",
+                "otp_required": False,
+                "otp_verified": True,
                 "can_fill_form": False,
                 "payment_status": submission.payment_status,
                 "message": "Payment is not yet received. Please complete fee payment to unlock the admission form."
@@ -2207,6 +2368,8 @@ class AdmissionFormEligibilityCheckView(APIView):
             logger.warning(f"[GET /api/admission-form/check-eligibility/] Form already submitted with Application No: {existing_application.application_number}")
             return Response({
                 "status": "already_submitted",
+                "otp_required": False,
+                "otp_verified": True,
                 "can_fill_form": False,
                 "already_submitted": True,
                 "application_number": existing_application.application_number,
@@ -2214,43 +2377,116 @@ class AdmissionFormEligibilityCheckView(APIView):
                 "message": f"This admission form has already been submitted (Application No: {existing_application.application_number}). You cannot submit it again."
             }, status=status.HTTP_200_OK)
 
-        logger.info(f"[GET /api/admission-form/check-eligibility/] Submission {submission_id} is VALID and ELIGIBLE to open form.")
+        logger.info(f"[GET /api/admission-form/check-eligibility/] Submission {submission_id} is VALID, OTP-VERIFIED, and ELIGIBLE to open form.")
+        return Response(_build_eligible_form_payload(submission), status=status.HTTP_200_OK)
+
+
+class AdmissionFormSendOTPView(APIView):
+    """
+    POST /api/admission-form/send-otp/
+    Explicitly sends or resends a 6-digit WhatsApp OTP via Meta Authentication template
+    to the registered WhatsApp number of any valid QuizSubmission.
+    Body: { "submission_id": 1 }
+    """
+    def post(self, request):
+        submission_id = request.data.get("submission_id")
+        if not submission_id:
+            return Response({
+                "status": "error",
+                "message": "submission_id is required."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        submission = QuizSubmission.objects.filter(id=submission_id).first()
+        if not submission:
+            return Response({
+                "status": "error",
+                "message": f"Quiz submission {submission_id} does not exist."
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        otp_info = _issue_and_send_form_otp(submission, force_resend=True)
+        if not otp_info.get("otp_sent"):
+            return Response({
+                "status": "error",
+                "otp_sent": False,
+                "masked_phone": otp_info.get("masked_phone", ""),
+                "message": otp_info.get("error", "Failed to send WhatsApp OTP. Please try again."),
+            }, status=status.HTTP_502_BAD_GATEWAY if submission.whatsapp_number else status.HTTP_400_BAD_REQUEST)
+
         return Response({
             "status": "success",
-            "can_fill_form": True,
-            "already_submitted": False,
+            "otp_sent": True,
             "submission_id": submission.id,
-            "language": submission.language or "en",
-            "score": submission.score,
-            "tag": submission.tag,
-            "vibhag": submission.vibhag,
-            "message": "Eligible to fill admission form.",
-            "draft_saved_at": submission.last_draft_saved_at,
-            "saved_draft": submission.admission_form_draft or {},
-            "saved_quiz_draft": submission.quiz_draft_answers or {},
-            "prefilled_data": {
-                "standard": submission.standard,
-                "medium": submission.medium,
-                "vibhag": submission.vibhag,
-                "parent_name": submission.parent_name,
-                "father_name": submission.parent_name,
-                "student_name": submission.child_name,
-                "child_name": submission.child_name,
-                "child_first_name": submission.child_name,
-                "surname": submission.surname,
-                "child_surname": submission.surname,
-                "father_surname": submission.surname,
-                "mother_surname": submission.surname,
-                "whatsapp_number": submission.whatsapp_number,
-                "father_whatsapp": submission.whatsapp_number,
-                "mother_whatsapp": submission.whatsapp_number,
-                "email": submission.email,
-                "father_email": submission.email,
-                "mother_email": submission.email,
-                "language": submission.language or "gu",
-                "is_locked_for_user": True
-            }
+            "masked_phone": otp_info.get("masked_phone", ""),
+            "otp_expires_in_seconds": otp_info.get("otp_expires_in_seconds", ADMISSION_FORM_OTP_TTL_SECONDS),
+            "message": "OTP sent successfully to your registered WhatsApp number.",
         }, status=status.HTTP_200_OK)
+
+
+class AdmissionFormVerifyOTPView(APIView):
+    """
+    POST /api/admission-form/verify-otp/
+    Verifies the 6-digit WhatsApp OTP and unlocks access to the Admission Form.
+    Body: { "submission_id": 1, "otp": "123456" }
+    """
+    def post(self, request):
+        submission_id = request.data.get("submission_id")
+        otp_input = str(request.data.get("otp") or "").strip()
+
+        if not submission_id or not otp_input:
+            return Response({
+                "status": "error",
+                "message": "Both submission_id and otp are required."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        submission = QuizSubmission.objects.filter(id=submission_id).first()
+        if not submission:
+            return Response({
+                "status": "error",
+                "message": f"Quiz submission {submission_id} does not exist."
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        if not submission.form_otp_code:
+            return Response({
+                "status": "error",
+                "error_code": "OTP_NOT_REQUESTED",
+                "message": "No active OTP found. Please request a new OTP."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if submission.form_otp_expires_at and timezone.now() > submission.form_otp_expires_at:
+            return Response({
+                "status": "error",
+                "error_code": "OTP_EXPIRED",
+                "message": "OTP has expired. Please request a new OTP."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if str(submission.form_otp_code).strip() != otp_input:
+            return Response({
+                "status": "error",
+                "error_code": "INVALID_OTP",
+                "message": "Invalid OTP. Please check your WhatsApp message and try again."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Mark verified and clear OTP
+        submission.form_otp_verified = True
+        submission.form_otp_verified_at = timezone.now()
+        submission.form_otp_code = None
+        submission.form_otp_expires_at = None
+        submission.save(update_fields=[
+            "form_otp_verified",
+            "form_otp_verified_at",
+            "form_otp_code",
+            "form_otp_expires_at",
+        ])
+
+        from .jwt_auth import generate_form_access_token
+        form_access_token = generate_form_access_token(submission.id, submission.whatsapp_number)
+
+        payload = _build_eligible_form_payload(submission)
+        payload["message"] = "OTP verified successfully. You can now access the admission form."
+        payload["form_access_token"] = form_access_token
+
+        logger.info(f"[POST /api/admission-form/verify-otp/] OTP verified for submission_id={submission.id}.")
+        return Response(payload, status=status.HTTP_200_OK)
 
 
 class AdmissionFormAutoSaveDraftView(APIView):
@@ -2283,6 +2519,14 @@ class AdmissionFormAutoSaveDraftView(APIView):
                 "status": "error",
                 "message": f"Submission {submission_id} not found."
             }, status=status.HTTP_404_NOT_FOUND)
+
+        if not _is_submission_otp_verified(request, submission):
+            return Response({
+                "status": "error",
+                "error_code": "OTP_VERIFICATION_REQUIRED",
+                "otp_required": True,
+                "message": "Please verify the OTP sent to your WhatsApp number before accessing the admission form."
+            }, status=status.HTTP_403_FORBIDDEN)
 
         draft_type = (request.query_params.get("type") or "all").lower()
         response_data = {
@@ -2327,6 +2571,14 @@ class AdmissionFormAutoSaveDraftView(APIView):
                     "error_code": "SUBMISSION_NOT_FOUND",
                     "message": f"Quiz submission with ID {sub_id_int} does not exist."
                 }, status=status.HTTP_404_NOT_FOUND)
+
+            if not _is_submission_otp_verified(request, submission):
+                return Response({
+                    "status": "error",
+                    "error_code": "OTP_VERIFICATION_REQUIRED",
+                    "otp_required": True,
+                    "message": "Please verify the OTP sent to your WhatsApp number before saving the admission form."
+                }, status=status.HTTP_403_FORBIDDEN)
 
             # If final application already submitted, don't allow modifying draft
             if hasattr(submission, 'admission_application') and submission.admission_application:
@@ -2611,6 +2863,15 @@ class AdmissionApplicationView(APIView):
                 "status": "error",
                 "message": "Cannot submit form! Payment has not been received."
             }, status=status.HTTP_402_PAYMENT_REQUIRED)
+
+        if not _is_submission_otp_verified(request, submission):
+            logger.warning(f"[POST /api/admission-form/] Submission {submission_id} attempted submit without OTP verification.")
+            return Response({
+                "status": "error",
+                "error_code": "OTP_VERIFICATION_REQUIRED",
+                "otp_required": True,
+                "message": "Please verify the OTP sent to your WhatsApp number before submitting the admission form."
+            }, status=status.HTTP_403_FORBIDDEN)
 
         existing_app = AdmissionApplication.objects.filter(submission=submission).first()
         if existing_app:

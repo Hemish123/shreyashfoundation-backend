@@ -583,4 +583,245 @@ def send_whatsapp_interaction_reminder_message(
         return {"success": False, "template": template_name, "error": str(e), "recipient": clean_phone}
 
 
+def send_whatsapp_survey_link_message(recipient_number: str, recipient_name: str = "") -> dict:
+    """
+    Sends the staff survey link (https://<domain>/survey) via WhatsApp Meta Graph API.
+    Uses a Meta template if WHATSAPP_SURVEY_TEMPLATE_NAME is configured in env,
+    otherwise sends a direct text message with the survey URL.
+    """
+    clean_phone = normalize_phone_number(recipient_number)
+    phone_number_id = getattr(settings, 'WHATSAPP_PHONE_NUMBER_ID', '')
+    access_token = getattr(settings, 'WHATSAPP_ACCESS_TOKEN', '')
+    frontend_base = getattr(settings, 'FRONTEND_BASE_URL', 'http://localhost:3000').rstrip('/')
+    survey_url = os.getenv('SURVEY_FORM_URL', f"{frontend_base}/survey")
+    template_name = os.getenv('WHATSAPP_SURVEY_TEMPLATE_NAME', '').strip()
+
+    if not phone_number_id or not access_token:
+        logger.warning("WhatsApp credentials not set in .env for survey invite dispatch")
+        return {
+            "success": False,
+            "error": "WhatsApp credentials not set in .env",
+            "recipient": clean_phone,
+            "survey_url": survey_url,
+        }
+
+    url = f"https://graph.facebook.com/v21.0/{phone_number_id}/messages"
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+    }
+
+    if template_name:
+        payload = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": clean_phone,
+            "type": "template",
+            "template": {
+                "name": template_name,
+                "language": {"code": "en"},
+            },
+        }
+    else:
+        greeting = f"Namaste {recipient_name}," if recipient_name else "Namaste,"
+        body_text = (
+            f"{greeting}\n\n"
+            f"You are invited to complete the anonymous Shreyas Foundation Staff Survey.\n"
+            f"Please fill out the form using the link below:\n{survey_url}"
+        )
+        payload = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": clean_phone,
+            "type": "text",
+            "text": {
+                "preview_url": True,
+                "body": body_text,
+            },
+        }
+
+    try:
+        response = requests.post(url, json=payload, headers=headers, timeout=10)
+        try:
+            res_data = response.json()
+        except Exception:
+            res_data = response.text
+
+        logger.info(f"Survey WhatsApp dispatch for {clean_phone}: status {response.status_code} - {res_data}")
+
+        if response.status_code == 200:
+            msg_id = ""
+            if isinstance(res_data, dict) and res_data.get("messages"):
+                msg_id = res_data["messages"][0].get("id", "")
+            if msg_id:
+                record_whatsapp_message_status(
+                    message_id=msg_id,
+                    status_val="sent",
+                    recipient=clean_phone,
+                    template_name=template_name or "survey_link_text",
+                )
+            return {
+                "success": True,
+                "recipient": clean_phone,
+                "message_id": msg_id,
+                "survey_url": survey_url,
+                "data": res_data,
+            }
+        else:
+            logger.error(f"Survey WhatsApp dispatch failed for {clean_phone}: {res_data}")
+            return {
+                "success": False,
+                "recipient": clean_phone,
+                "survey_url": survey_url,
+                "error": res_data,
+            }
+    except Exception as e:
+        logger.error(f"Survey WhatsApp dispatch exception: {str(e)}")
+        return {
+            "success": False,
+            "recipient": clean_phone,
+            "survey_url": survey_url,
+            "error": str(e),
+        }
+
+
+def mask_phone_number(phone_number: str) -> str:
+    """
+    Masks a phone number for safe display in API responses (e.g. 919876543210 -> ******3210).
+    """
+    clean = normalize_phone_number(phone_number)
+    if len(clean) <= 4:
+        return "****"
+    return ("*" * (len(clean) - 4)) + clean[-4:]
+
+
+def send_whatsapp_otp_template(
+    recipient_number: str,
+    otp_code: str,
+    submission_id: int = None,
+    template_name: str = None,
+) -> dict:
+    """
+    Sends a 6-digit OTP to the parent's WhatsApp number using a Meta Authentication Template
+    (body {{1}} + Copy Code URL button {{1}}).
+    Template name defaults to env WHATSAPP_OTP_TEMPLATE_NAME or 'otp'.
+    """
+    clean_phone = normalize_phone_number(recipient_number)
+    phone_number_id = getattr(settings, 'WHATSAPP_PHONE_NUMBER_ID', '')
+    access_token = getattr(settings, 'WHATSAPP_ACCESS_TOKEN', '')
+    resolved_template = (
+        template_name
+        or os.getenv('WHATSAPP_OTP_TEMPLATE_NAME', '').strip()
+        or 'otp'
+    )
+
+    if not phone_number_id or not access_token:
+        logger.warning("WhatsApp credentials not set in .env for OTP template dispatch")
+        return {
+            "success": False,
+            "template": resolved_template,
+            "error": "WhatsApp credentials not set in .env",
+            "recipient": clean_phone,
+        }
+
+    url = f"https://graph.facebook.com/v21.0/{phone_number_id}/messages"
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+    }
+
+    payload = {
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": clean_phone,
+        "type": "template",
+        "template": {
+            "name": resolved_template,
+            "language": {
+                "code": "en"
+            },
+            "components": [
+                {
+                    "type": "body",
+                    "parameters": [
+                        {
+                            "type": "text",
+                            "text": str(otp_code)
+                        }
+                    ]
+                },
+                {
+                    "type": "button",
+                    "sub_type": "url",
+                    "index": "0",
+                    "parameters": [
+                        {
+                            "type": "text",
+                            "text": str(otp_code)
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+
+    try:
+        logger.info(f"[ADMISSION OTP] Sending OTP template '{resolved_template}' to {clean_phone} (SubID: {submission_id})...")
+        response = requests.post(url, json=payload, headers=headers, timeout=10)
+        try:
+            res_data = response.json()
+        except Exception:
+            res_data = response.text
+
+        logger.info(f"WhatsApp OTP Template '{resolved_template}' response for {clean_phone}: status {response.status_code} - {res_data}")
+
+        if response.status_code == 200:
+            msg_id = ""
+            if isinstance(res_data, dict) and res_data.get("messages"):
+                msg_id = res_data["messages"][0].get("id", "")
+
+            if msg_id:
+                record_whatsapp_message_status(
+                    message_id=msg_id,
+                    status_val="sent",
+                    recipient=clean_phone,
+                    template_name=resolved_template,
+                    submission_id=submission_id,
+                )
+
+            trigger_saas_crm_template(
+                phone=clean_phone,
+                template_name=resolved_template,
+                submission_id=submission_id,
+                parameters={"1": "******"},
+                language="en",
+                message_id=msg_id,
+            )
+
+            return {
+                "success": True,
+                "template": resolved_template,
+                "data": res_data,
+                "recipient": clean_phone,
+                "message_id": msg_id,
+            }
+        else:
+            logger.error(f"WhatsApp OTP Template '{resolved_template}' failed for {clean_phone}: {res_data}")
+            return {
+                "success": False,
+                "template": resolved_template,
+                "error": res_data,
+                "recipient": clean_phone,
+            }
+    except Exception as e:
+        logger.error(f"WhatsApp OTP Template exception: {str(e)}")
+        return {
+            "success": False,
+            "template": resolved_template,
+            "error": str(e),
+            "recipient": clean_phone,
+        }
+
+
+
 

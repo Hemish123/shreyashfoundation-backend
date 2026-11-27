@@ -1,7 +1,7 @@
 from django import forms
 from django.contrib import admin
 from django.utils.html import format_html
-from .models import QuizSubmission, AdmissionApplication, AdminUser, AuditLog
+from .models import QuizSubmission, AdmissionApplication, AdminUser, AuditLog, SurveyResponse, SurveyInvite
 
 
 class AdminUserForm(forms.ModelForm):
@@ -166,3 +166,20 @@ class AdmissionApplicationAdmin(admin.ModelAdmin):
             return format_html('<strong>#{}</strong>', obj.submission_id)
         return "-"
     submission_id_display.short_description = "Submission ID"
+
+
+@admin.register(SurveyResponse)
+class SurveyResponseAdmin(admin.ModelAdmin):
+    list_display = ('id', 'language', 'department_value', 'created_at')
+    list_filter = ('language', 'department_value', 'created_at')
+    search_fields = ('department_value',)
+    readonly_fields = ('language', 'department_value', 'answers', 'created_at')
+
+
+@admin.register(SurveyInvite)
+class SurveyInviteAdmin(admin.ModelAdmin):
+    list_display = ('id', 'name', 'phone', 'send_count', 'whatsapp_status', 'sent_at', 'last_sent_at')
+    list_filter = ('whatsapp_status', 'sent_at', 'last_sent_at')
+    search_fields = ('name', 'phone')
+    readonly_fields = ('sent_at',)
+
