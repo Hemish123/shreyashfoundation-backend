@@ -2192,8 +2192,11 @@ def _extract_form_access_token(request) -> str:
 
 
 def _is_submission_otp_verified(request, submission: QuizSubmission) -> bool:
-    if submission.form_otp_verified:
-        return True
+    """
+    Strictly requires a valid signed ADMISSION_FORM access token (issued on OTP verify)
+    for this specific submission_id. Does NOT bypass via DB flag so every new tab or
+    incognito session opening the link must verify OTP again.
+    """
     from .jwt_auth import verify_form_access_token
     token = _extract_form_access_token(request)
     if token and verify_form_access_token(token, expected_submission_id=submission.id):
