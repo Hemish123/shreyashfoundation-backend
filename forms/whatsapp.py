@@ -715,6 +715,15 @@ def send_whatsapp_otp_template(
         or 'otp'
     )
 
+    if not clean_phone or len(clean_phone) < 10:
+        logger.warning(f"Invalid WhatsApp number '{recipient_number}' (normalized: '{clean_phone}') for OTP dispatch")
+        return {
+            "success": False,
+            "template": resolved_template,
+            "error": f"Invalid WhatsApp number ({len(clean_phone)} digits). A valid 10-digit mobile number is required.",
+            "recipient": clean_phone,
+        }
+
     if not phone_number_id or not access_token:
         logger.warning("WhatsApp credentials not set in .env for OTP template dispatch")
         return {
