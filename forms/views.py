@@ -2168,7 +2168,7 @@ class VerifyPaymentAndSendWhatsAppView(APIView):
 # Admission Form & Pre-fill 
 # ==============================================================================
 
-ADMISSION_FORM_OTP_TTL_SECONDS = 600  # 10 minutes
+ADMISSION_FORM_OTP_TTL_SECONDS = 300  # 5 minutes (matches Meta 'otp' template validity period)
 ADMISSION_FORM_OTP_RESEND_COOLDOWN_SECONDS = 60
 
 
