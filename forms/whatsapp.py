@@ -583,17 +583,17 @@ def send_whatsapp_interaction_reminder_message(
         return {"success": False, "template": template_name, "error": str(e), "recipient": clean_phone}
 
 
-def send_whatsapp_survey_link_message(recipient_number: str, recipient_name: str = "") -> dict:
+def send_whatsapp_survey_link_message(recipient_number: str, invite_id: int, recipient_name: str = "") -> dict:
     """
-    Sends the staff survey link (https://<domain>/survey) via WhatsApp Meta Graph API.
-    Uses a Meta template if WHATSAPP_SURVEY_TEMPLATE_NAME is configured in env,
-    otherwise sends a direct text message with the survey URL.
+    Sends the staff survey link (https://shreyas.jmstech.co/survey/<invite_id>) via WhatsApp Meta Graph API.
+    Uses a Meta Dynamic URL Button template if WHATSAPP_SURVEY_TEMPLATE_NAME is configured in env,
+    otherwise sends a direct text message with the dynamic survey URL.
     """
     clean_phone = normalize_phone_number(recipient_number)
     phone_number_id = getattr(settings, 'WHATSAPP_PHONE_NUMBER_ID', '')
     access_token = getattr(settings, 'WHATSAPP_ACCESS_TOKEN', '')
-    frontend_base = getattr(settings, 'FRONTEND_BASE_URL', 'http://localhost:3000').rstrip('/')
-    survey_url = os.getenv('SURVEY_FORM_URL', f"{frontend_base}/survey")
+    base_survey_url = os.getenv('SURVEY_FORM_URL', 'https://shreyas.jmstech.co/survey').rstrip('/')
+    survey_url = f"{base_survey_url}/{invite_id}"
     template_name = os.getenv('WHATSAPP_SURVEY_TEMPLATE_NAME', '').strip()
 
     if not phone_number_id or not access_token:
@@ -620,6 +620,19 @@ def send_whatsapp_survey_link_message(recipient_number: str, recipient_name: str
             "template": {
                 "name": template_name,
                 "language": {"code": "en"},
+                "components": [
+                    {
+                        "type": "button",
+                        "sub_type": "url",
+                        "index": "0",
+                        "parameters": [
+                            {
+                                "type": "text",
+                                "text": str(invite_id),
+                            }
+                        ],
+                    }
+                ],
             },
         }
     else:

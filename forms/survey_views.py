@@ -231,15 +231,20 @@ class SurveyInvitesView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        wa_result = send_whatsapp_survey_link_message(clean_phone, recipient_name=name)
-        wa_status = "SENT" if wa_result.get("success") else "FAILED"
-
         invite = SurveyInvite.objects.create(
             name=name,
             phone=clean_phone,
             send_count=1,
-            whatsapp_status=wa_status,
+            whatsapp_status="PENDING",
         )
+
+        wa_result = send_whatsapp_survey_link_message(
+            clean_phone,
+            invite_id=invite.id,
+            recipient_name=name,
+        )
+        invite.whatsapp_status = "SENT" if wa_result.get("success") else "FAILED"
+        invite.save(update_fields=["whatsapp_status"])
 
         return Response(_serialize_invite(invite), status=status.HTTP_201_CREATED)
 
@@ -287,7 +292,11 @@ class SurveyInviteResendView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        wa_result = send_whatsapp_survey_link_message(invite.phone, recipient_name=invite.name)
+        wa_result = send_whatsapp_survey_link_message(
+            invite.phone,
+            invite_id=invite.id,
+            recipient_name=invite.name,
+        )
         invite.send_count += 1
         invite.last_sent_at = timezone.now()
         invite.whatsapp_status = "SENT" if wa_result.get("success") else "FAILED"
